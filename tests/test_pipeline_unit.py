@@ -150,17 +150,7 @@ class UnfinishedRunTest(Tmp):
         os.utime(self.marker, ns=(st.st_atime_ns, st.st_mtime_ns))
         cast(Callable[[Job], None], self.begin)(self.job)
         self.assertEqual(sorted(q.name for q in self.segs.iterdir()), ["0000_old.mkv"])
-        self.assertEqual(json.loads(self.marker.read_text()), {"work": str(self.work), "gfx": ["../x"]})  # rewritten whole for this run (unsafe id never retired)
-
-    def test_other_projects_marker_drops_segs_but_not_our_gfx(self):
-        self.run_cut_short()
-        other = self.tmp / "other"
-        (other / "gfx").mkdir(parents=True)
-        (other / "gfx" / "g2.mov").write_text("theirs, complete")
-        begin, _ = pipeline.unfinished_guard(other, self.marker, self.segs, None)  # same film name, same render/<film>/segs
-        cast(Callable[[Job], None], begin)(self.job)
-        self.assertEqual(sorted(q.name for q in self.segs.iterdir()), ["0000_old.mkv"])
-        self.assertTrue((other / "gfx" / "g2.mov").exists())
+        self.assertEqual(json.loads(self.marker.read_text()), {"gfx": ["../x"]})  # rewritten whole for this run (unsafe id never retired)
 
     def test_finished_run_keeps_its_files(self):
         self.run_cut_short()
@@ -169,24 +159,71 @@ class UnfinishedRunTest(Tmp):
         self.assertEqual(len(list(self.segs.iterdir())), 2)
         self.assertTrue((self.gfx / "g2.mov").exists())
 
-    def test_render_that_exits_0_without_done_keeps_the_marker(self):
-        log = self.tmp / "render.log"
-        log.write_text("DONE f\n")  # an earlier, finished render of the same film
+    def render(self, work):
+        """render_steps of `work` with render/ in tmp: (mark_log, segs_begin, gfx_begin, finished), run_v4.sh left out."""
         with mock.patch.object(pipeline, "RENDER", self.tmp):
-            steps = pipeline.render_steps(self.work, "f", self.tmp)
-        begin, mark_log, finished = (cast(Callable[[Job], None], s) for s in (steps[0], steps[1], steps[3]))
-        begin(self.job)
-        mark_log(self.job)
+            steps = pipeline.render_steps(work, "f", self.tmp)
+        return [cast(Callable[[Job], None], s) for s in steps if not isinstance(s, Cmd)]
+
+    def start(self, steps):
+        for step in steps[:3]:
+            step(self.job)
+
+    def log(self, text):
+        with (self.tmp / "render.log").open("a") as f:
+            f.write(text)
+
+    def test_render_that_exits_0_without_done_keeps_the_marker(self):
+        self.log("DONE f\n")  # an earlier, finished render of the same film
+        steps = self.render(self.work)
+        self.start(steps)
         marker = self.tmp / "f" / "panel-unfinished.json"
-        with log.open("a") as f:
-            f.write("ffmpeg: No space left on device\nALL_DONE\n")  # run_v4.sh still exits 0
+        self.log("ffmpeg: No space left on device\nUNDONE f\nALL_DONE\n")  # run_v4.sh still exits 0
         with self.assertRaises(StepFailed):
-            finished(self.job)
+            steps[3](self.job)
         self.assertTrue(marker.exists())
-        with log.open("a") as f:
-            f.write("DONE f\nALL_DONE\n")
-        finished(self.job)
+        self.assertTrue(pipeline.gfx_marker(self.work).exists())
+        self.log("DONE f\nALL_DONE\n")
+        steps[3](self.job)
         self.assertFalse(marker.exists())
+        self.assertFalse(pipeline.gfx_marker(self.work).exists())
+
+    def test_other_project_with_the_same_film_does_not_erase_our_cut_gfx(self):
+        rsegs = self.tmp / "f" / "segs"  # render/<film>/segs: shared by both projects
+        rsegs.mkdir(parents=True)
+        a = self.render(self.work)
+        self.start(a)
+        (self.gfx / "g2.mov").write_text("half")  # project A stopped while rendering g2
+        (rsegs / "0001_cut.mkv").write_text("half")
+        other = self.tmp / "other"
+        (other / "gfx").mkdir(parents=True)
+        (other / "gfx_specs.json").write_text("[]")
+        b = self.render(other)
+        self.start(b)  # B drops the shared segs A may have cut
+        self.assertEqual(list(rsegs.iterdir()), [])
+        self.log("DONE f\n")
+        b[3](self.job)
+        self.start(self.render(self.work))  # A again: its own marker still lists g2
+        self.assertFalse((self.gfx / "g2.mov").exists())
+        self.assertTrue((self.gfx / "g1.mov").exists())
+
+    def test_stop_after_the_film_was_assembled_keeps_the_segs(self):
+        rsegs = self.tmp / "f" / "segs"
+        rsegs.mkdir(parents=True)
+        steps = self.render(self.work)
+        self.start(steps)
+        (rsegs / "0001_done.mkv").write_text("complete")
+        self.log("DONE f\n")  # Stop came in the critic --video after this line
+        self.start(self.render(self.work))
+        self.assertEqual([q.name for q in rsegs.iterdir()], ["0001_done.mkv"])
+        self.assertIn("po złożeniu", " ".join(self.job.lines))
+
+    def test_marker_that_is_not_an_object_is_unfinished(self):
+        self.run_cut_short()
+        self.marker.write_text("[]")
+        os.utime(self.marker, (time.time() - 30, time.time() - 30))
+        cast(Callable[[Job], None], self.begin)(self.job)
+        self.assertEqual(sorted(q.name for q in self.segs.iterdir()), ["0000_old.mkv"])
 
     def test_every_long_step_is_guarded(self):
         (self.work / "plan_f.json").write_text(json.dumps({"edl_out": "edl_f.json", "gfx_specs": "gfx_specs.json"}))

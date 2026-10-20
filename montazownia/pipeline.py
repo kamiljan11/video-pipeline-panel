@@ -43,10 +43,12 @@ def critic_report(work: Path, film: str) -> Path:
     return scratch(work, f"critic_{film}.json")
 
 
-def unfinished_guard(work: Path, marker: Path, segs: Path | None, specs: str | None) -> tuple[PyStep, PyStep]:
+def unfinished_guard(work: Path, marker: Path, segs: Path | None, specs: str | None,
+                     note: Callable[[], dict] | None = None, completed: Callable[[dict], bool] | None = None) -> tuple[PyStep, PyStep]:
     """Steps around a run whose Stop / limit / crash would leave files cut short under their final names, which the
     pipeline then reuses (assemble.py keeps segs/*.mkv, gfx/render.mjs keeps <id>.mov). The marker is removed only when
-    the run finishes; if it is still there, the next run first drops what the unfinished one may have cut."""
+    the run finishes; if it is still there, the next run first drops what the unfinished one may have cut.
+    `note` adds fields to the marker; `completed(marker)` says the unfinished run got past the risky part after all."""
     gdir = work / "gfx"
 
     def begin(job: Job) -> None:
@@ -56,21 +58,40 @@ def unfinished_guard(work: Path, marker: Path, segs: Path | None, specs: str | N
                 left = json.loads(marker.read_text(encoding="utf-8"))
             except (OSError, ValueError):  # cut short itself: still an unfinished run, only the gfx list is lost
                 left = {}
-            cut = [q for q in segs.glob("*.mkv") if q.stat().st_mtime >= since] if segs and segs.is_dir() else []
-            for q in cut:  # written during the unfinished run: one of them may be cut short (6 in parallel)
-                q.unlink(missing_ok=True)
-            ids = left.get("gfx", []) if left.get("work") == str(work) else []  # render/<film> is shared: gfx belong to one project
-            gone = [gid for gid in ids if FILM_NAME.fullmatch(str(gid)) and retire_gfx_file(work, gdir / f"{gid}.mov")]
-            job.say(f"poprzednie uruchomienie się nie skończyło: usuwam {len(cut)} ujęć i {len(gone)} grafik do ponownego renderu")
+            left = left if isinstance(left, dict) else {}
+            if completed and completed(left):
+                job.say("poprzednie uruchomienie zatrzymane po złożeniu filmu: pliki zostają")
+            else:
+                cut = [q for q in segs.glob("*.mkv") if q.stat().st_mtime >= since] if segs and segs.is_dir() else []
+                for q in cut:  # written during the unfinished run: one of them may be cut short (6 in parallel)
+                    q.unlink(missing_ok=True)
+                ids = left.get("gfx", []) if isinstance(left.get("gfx"), list) else []
+                gone = [gid for gid in ids if FILM_NAME.fullmatch(str(gid)) and retire_gfx_file(work, gdir / f"{gid}.mov")]
+                job.say(f"poprzednie uruchomienie się nie skończyło: usuwam {len(cut)} ujęć i {len(gone)} grafik do ponownego renderu")
         sp = work / specs if specs else None
         missing = [g["id"] for g in read_json(sp) if not (gdir / f"{g['id']}.mov").exists()] if sp and sp.exists() else []
         marker.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write(marker, json.dumps({"work": str(work), "gfx": missing}))
+        atomic_write(marker, json.dumps({"gfx": missing, **(note() if note else {})}))
 
     def end(job: Job) -> None:
         marker.unlink(missing_ok=True)
 
     return begin, end
+
+
+def gfx_marker(work: Path) -> Path:
+    """One per project: work/gfx belongs to the project (gfx before a preview and the full render both use it)."""
+    return scratch(work, "gfx.unfinished.json")
+
+
+def done_in_log(log: Path, film: str, at: int) -> bool:
+    """run_v4.sh writes the line "DONE <film>" only after assemble.py and the move of the film succeeded."""
+    try:
+        with open(log, encoding="utf-8", errors="replace") as f:
+            f.seek(at)
+            return f"DONE {film}" in f.read().splitlines()
+    except OSError:
+        return False
 
 
 def rebuild_steps(work: Path, film: str) -> list[Step]:
@@ -164,32 +185,35 @@ def preview_steps(work: Path, film: str, t: float, half: float = 10.0) -> list[S
 def render_steps(work: Path, film: str, out_dir: Path) -> list[Step]:
     log = RENDER / "render.log"
     logs = [log, RENDER / f"critic_{film}.log"]
-    # run_v4.sh renders gfx_specs.json into work/gfx and assembles into render/<film>/segs
-    # the marker sits next to the segs: render/<film> is shared by every project with a film of that name
-    begin, end = unfinished_guard(work, RENDER / film / "panel-unfinished.json", RENDER / film / "segs", "gfx_specs.json")
-    start = {}
+    start = {"at": 0}
 
     def mark_log(job: Job) -> None:
         start["at"] = log.stat().st_size if log.exists() else 0
 
+    # run_v4.sh assembles into render/<film>/segs, shared by every project with a film of that name: the segs marker sits
+    # there; it renders gfx_specs.json into work/gfx, which is this project's: that marker is per project
+    segs_begin, segs_end = unfinished_guard(work, RENDER / film / "panel-unfinished.json", RENDER / film / "segs", None,
+                                            note=lambda: {"log_at": start["at"]},
+                                            completed=lambda m: isinstance(m.get("log_at"), int) and done_in_log(log, film, m["log_at"]))
+    gfx_begin, gfx_end = unfinished_guard(work, gfx_marker(work), None, "gfx_specs.json")
+
     def finished(job: Job) -> None:
         # run_v4.sh exits 0 even when assemble.py failed (no set -e, `echo ALL_DONE` last): its own "DONE <film>" is the proof
-        with open(log, encoding="utf-8", errors="replace") as f:
-            f.seek(start["at"])
-            if f"DONE {film}\n" not in f.read():
-                raise StepFailed("render się nie udał (brak „DONE” w render.log): szczegóły w logu powyżej")
-        end(job)
+        if not done_in_log(log, film, start["at"]):
+            raise StepFailed("render się nie udał (brak „DONE” w render.log): szczegóły w logu powyżej")
+        segs_end(job)
+        gfx_end(job)
 
     # a full long-form render takes tens of minutes; the limit only catches a hang
-    return [begin, mark_log, Cmd(["nice", "-n", "5", "bash", _s("run_v4.sh"), str(work), str(out_dir), film], work, tail=logs, timeout=4 * 3600),
-            finished]
+    return [mark_log, segs_begin, gfx_begin,
+            Cmd(["nice", "-n", "5", "bash", _s("run_v4.sh"), str(work), str(out_dir), film], work, tail=logs, timeout=4 * 3600), finished]
 
 
 def gfx_steps(work: Path, plan: dict) -> list[Step]:
     """gfx/render.mjs renders every graphic whose .mov is missing (Chrome + ffmpeg)."""
     if not plan.get("gfx_specs"):
         return []
-    begin, end = unfinished_guard(work, scratch(work, "gfx.unfinished.json"), None, plan["gfx_specs"])
+    begin, end = unfinished_guard(work, gfx_marker(work), None, plan["gfx_specs"])
     return [begin, Cmd(["node", _s("gfx/render.mjs"), plan["gfx_specs"], "gfx"], work, timeout=1800), end]
 
 
