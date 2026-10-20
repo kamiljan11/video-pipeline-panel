@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+"""build_edl.py plan.json -> edl.json
+plan: {"words": "x.cw.json", "sil": "x.sil", "src": "/path.mp4", "keeps": [[w0, w1, {"t0":opt,"t1":opt}], ...],
+       "gfx": [{"id":..., "word": idx, "lead": 0.0}], "gfx_dir": "...", "gfx_specs": "...", "face": [x,y], "zooms": [1.0, 1.15]}"""
+import json, sys, re
+P = json.load(open(sys.argv[1]))
+W = [(x["offsets"]["from"] / 1000, x["offsets"]["to"] / 1000, x["text"]) for x in json.load(open(P["words"]))["transcription"]]
+v = [float(x) for x in re.findall(r"silence_(?:start|end): ([0-9.]+)", open(P["sil"]).read())]
+SIL = [(v[i], v[i + 1]) for i in range(0, len(v) - 1, 2)]
+PRE, POST, MINGAP, KEEP_L, KEEP_R = 0.10, 0.16, 0.45, 0.15, 0.12
+ranges = []
+for k in P["keeps"]:
+    a, b = k[0], k[1]; o = k[2] if len(k) > 2 else {}
+    t0 = o.get("t0", W[a][0] - PRE); t1 = o.get("t1", W[b][1] + POST)
+    if a > 0 and "t0" not in o: t0 = max(t0, W[a - 1][1] + 0.02)
+    if b + 1 < len(W) and "t1" not in o: t1 = min(t1, max(W[b + 1][0] - 0.03, W[b][1] + 0.05))
+    # if a real silence sits right at the boundary, snap into it (cleaner cut)
+    for ss, se in SIL:
+        if ss - 0.3 < t0 < se and se - t0 < 0.4: t0 = max(t0, se - 0.08)
+        if ss < t1 < se + 0.3 and t1 - ss < 0.4: t1 = min(t1, ss + 0.12)
+    # drop leftover blips: keep that starts with <0.35 s of sound then a long pause starts after the pause (and mirror for the end)
+    for ss, se in SIL:
+        if se - ss > 0.4 and t0 <= ss < t0 + 0.35 and se < t1 - 0.5: t0 = se - 0.08
+        if se - ss > 0.4 and t1 - 0.35 < se <= t1 and ss > t0 + 0.5: t1 = ss + 0.12
+    ranges.append([max(0.0, t0), t1, a])
+# tighten long pauses inside kept ranges using measured silence
+segs = []
+for t0, t1, a in ranges:
+    cur = t0
+    for ss, se in SIL:
+        if ss > cur + 0.3 and se < t1 - 0.3 and se - ss > MINGAP:
+            segs.append([cur, ss + KEEP_L, "pause"]); cur = se - KEEP_R
+    segs.append([cur, t1, "end"])
+# zoom: toggle only on real jump cuts (removed > 0.8 s of source) -> hides the jump
+zs = P.get("zooms", [1.0, 1.15]); zi = 0; out = []; prev_end = None
+for s0, s1, kind in segs:
+    if prev_end is not None and (s0 - prev_end > 0.8 or P.get("zoom_every_cut")): zi = (zi + 1) % len(zs)
+    out.append({"src": "A", "in": round(s0, 3), "out": round(s1, 3), "zoom": zs[zi]}); prev_end = s1
+def src2out(t):
+    acc = 0.0
+    for s in out:
+        if t < s["in"]: return acc
+        if t <= s["out"]: return acc + t - s["in"]
+        acc += s["out"] - s["in"]
+    return acc
+total = sum(s["out"] - s["in"] for s in out)
+specs = {s["id"]: s for s in json.load(open(P["gfx_specs"]))} if P.get("gfx_specs") else {}
+ovs = []
+for g in P.get("gfx", []):
+    if "find" in g:
+        c = [i for i in range(max(0, g["near"] - 25), min(len(W), g["near"] + 25)) if g["find"].lower() in W[i][2].lower()]
+        g["word"] = min(c, key=lambda i: abs(i - g["near"]))
+    at = total if g["word"] == "END" else src2out(W[g["word"]][0]) + g.get("lead", 0.0)
+    ovs.append({"file": f"{P['gfx_dir']}/{g['id']}.mov", "at": round(at, 3), "dur": specs[g["id"]]["dur"], "id": g["id"], "pip": specs[g["id"]].get("type") == "slide"})
+# no punch-in while a side box is on screen (box would cover the face)
+acc = 0.0
+for sg in out:
+    d = sg["out"] - sg["in"]
+    for o in ovs:
+        if specs.get(o["id"], {}).get("type") in ("kw", "list", "slide") and acc < o["at"] + o["dur"] and acc + d > o["at"]:
+            sg["zoom"] = 1.0
+    acc += d
+# ---- animated zooms: slow drift on long shots, quick punch on emphasis words ----
+boxed = set(); acc = 0.0
+for k, sg in enumerate(out):
+    d = sg["out"] - sg["in"]
+    for o in ovs:
+        if specs.get(o["id"], {}).get("type") in ("kw", "list", "slide") and acc < o["at"] + o["dur"] and acc + d > o["at"]:
+            boxed.add(k)
+    acc += d
+DRIFT = P.get("drift", 0.05); flip = 0
+for k, sg in enumerate(out):
+    d = sg["out"] - sg["in"]; base = sg["zoom"]
+    if k in boxed or d < 3.0 or DRIFT <= 0: continue
+    a, b = (base, base + DRIFT) if flip % 2 == 0 else (base + DRIFT, base)
+    sg["zoom"] = {"a": round(a, 3), "b": round(b, 3), "t0": 0.0, "t1": round(d, 3)}; flip += 1
+for em in P.get("emph", []):
+    if "word" in em: c = [em["word"]]
+    else: c = [i for i in range(max(0, em["near"] - 30), min(len(W), em["near"] + 30)) if em["find"].lower() in W[i][2].lower()]
+    if not c: print("emph not found", em); continue
+    ts = W[min(c, key=lambda i: abs(i - em.get("near", c[0])))][0]
+    acc_e = 0.0
+    for k, sg in enumerate(out):
+        if sg["in"] <= ts <= sg["out"]:
+            t_out = acc_e + ts - sg["in"]; seg_end = acc_e + sg["out"] - sg["in"]
+            hit = [o["id"] for o in ovs if specs.get(o["id"], {}).get("type") in ("kw", "list", "slide") and o["at"] < seg_end and o["at"] + o["dur"] > t_out - 0.2]
+            if hit: print("emph skipped (box on screen)", em.get("find", em.get("word")), hit); break
+            base = sg["zoom"]["a"] if isinstance(sg["zoom"], dict) else sg["zoom"]
+            t0 = max(0.0, ts - sg["in"] - 0.12)
+            sg["zoom"] = {"a": base, "b": round(min(base + em.get("amt", 0.2), 1.38), 3), "t0": round(t0, 3), "t1": round(t0 + em.get("speed", 0.3), 3)}
+            print("emph", em.get("find", em.get("word")), "seg", k); break
+        acc_e += sg["out"] - sg["in"]
+edl = {"name": P.get("name", "montaz"), "sources": {"A": P["src"]}, "segments": out, "overlays": ovs, "face": P.get("face", [0.5, 0.45]),
+       "tail": P.get("tail", 0), "w": 2560, "h": 1440, "out_name": P.get("out_name", "final.mp4"), "gfx_specs": P.get("gfx_specs"), "progress": P.get("progress", False), "music_seed": P.get("music_seed", 7)}
+if P.get("vertical"):
+    edl.update({"vertical": True, "w": 1080, "h": 1920, "subs": P.get("ass_out"), "tail": 0})
+
+txt = []
+for k in P["keeps"]: txt.append("".join(W[i][2] for i in range(k[0], k[1] + 1)).strip())
+open(P["edl_out"].replace(".json", ".txt"), "w").write("\n".join(txt))
+print("segments", len(out), "jumpcuts", sum(1 for i in range(1, len(out)) if out[i]["zoom"] != out[i-1]["zoom"]), "duration", round(total, 1), "s")
+for o in ovs: print(o["id"], o["at"])
+for w in P.get("probe", []): print("probe", w, round(src2out(W[w][0]), 2))
+
+# ---- captions (SRT for long-form upload, ASS burned-in for vertical) ----
+FIX = {"porekscytowany": "podekscytowany", "jaj,": "AI,", "zapewniła": "zapełniła", "podescytowany": "podekscytowany",
+       "mnie": "mniej" , "czat": "czat", "techniczne": "technicznie"}
+def fixw(w):
+    k = w.strip(); lk = k.lower()
+    return FIX.get(lk, k) if lk in ("porekscytowany", "jaj,", "zapewniła", "podescytowany") else k
+kept = []
+for k in P["keeps"]:
+    for i in range(k[0], k[1] + 1):
+        t = W[i][2].strip()
+        if not t: continue
+        st = src2out(W[i][0]); en = src2out(W[i][1])
+        kept.append([st, max(en, st + 0.12), fixw(t)])
+def ts(t, sep=","):
+    h = int(t // 3600); m = int(t % 3600 // 60); s = t % 60
+    return f"{h:02d}:{m:02d}:{s:06.3f}".replace(".", sep)
+if P.get("srt_out"):
+    # sentence-ish lines, max ~42 chars
+    out_l, cur = [], []
+    for w in kept:
+        cur.append(w)
+        txt = " ".join(x[2] for x in cur)
+        if len(txt) > 70 or re.search(r"[.?!]$", w[2]) or (len(txt) > 45 and w[2].endswith(",")):
+            out_l.append(cur); cur = []
+    if cur: out_l.append(cur)
+    def wrap(ws):
+        t = " ".join(x[2] for x in ws)
+        if len(t) <= 42: return t
+        best = None
+        for k in range(1, len(ws)):
+            a, b2 = " ".join(x[2] for x in ws[:k]), " ".join(x[2] for x in ws[k:])
+            sc = max(len(a), len(b2))
+            if best is None or sc < best[0]: best = (sc, a + "\n" + b2)
+        return best[1]
+    with open(P["srt_out"], "w") as f:
+        for n, l in enumerate(out_l, 1):
+            e = max(l[-1][1] + 0.05, l[0][0] + 0.85)
+            if n < len(out_l): e = min(e, out_l[n][0][0] - 0.02)
+            f.write(f"{n}\n{ts(l[0][0])} --> {ts(e)}\n{wrap(l)}\n\n")
+if P.get("ass_out"):
+    hdr = """[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Cap,Montserrat,92,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,7,3,2,70,130,540,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+    ev = []; i = 0
+    while i < len(kept):
+        grp = [kept[i]]; i += 1
+        while i < len(kept) and len(grp) < 3 and len(" ".join(x[2] for x in grp + [kept[i]])) <= 18 and not re.search(r"[.?!,]$", grp[-1][2]):
+            grp.append(kept[i]); i += 1
+        for j, w in enumerate(grp):  # karaoke-style: current word in accent colour
+            end = grp[j + 1][0] if j + 1 < len(grp) else (kept[i][0] if i < len(kept) else w[1])
+            txt = " ".join(("{\\c&HC4E22D&}" + x[2].strip(",.").upper() + "{\\c&HFFFFFF&}") if k == j else x[2].strip(",.").upper() for k, x in enumerate(grp))
+            ev.append(f"Dialogue: 0,{ts(w[0], '.')[1:-1]},{ts(min(end, w[1] + 0.6), '.')[1:-1]},Cap,,0,0,0,,{txt}")
+    if P.get("hook_text"):
+        hdr = hdr.replace("[Events]", "Style: Hook,Montserrat,84,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,3,0,0,8,90,130,330,1\n\n[Events]")
+        hdr = hdr.replace("Style: Hook,Montserrat,84,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000", "Style: Hook,Montserrat,84,&H00FFFFFF,&H00FFFFFF,&H00000000,&HD8120F0D")
+        ev.insert(0, f"Dialogue: 1,0:00:00.00,0:00:{P.get('hook_dur', 3.0):05.2f},Hook,,0,0,0,,{{\\fad(0,250)\\bord14}}{P['hook_text']}")
+    open(P["ass_out"], "w").write(hdr + "\n".join(ev) + "\n")
+
+json.dump(edl, open(P["edl_out"], "w"), indent=1, ensure_ascii=False)

@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+"""assemble.py edl.json outdir
+edl.json: {"sources": {"A": "/path.mp4"}, "segments": [{"src":"A","in":1.2,"out":5.4,"zoom":1.0}],
+           "overlays": [{"file":"gfx/x.mov","at":12.3}], "w":2560, "h":1440,
+           "face": [0.53, 0.42], "out_name": "final.mp4", "vertical": false}
+Stage 1: each segment -> intermediate (accurate cut, zoom/crop, 12ms audio fades)
+Stage 2: concat + overlays + audio master + grade -> final."""
+import json, sys, os, subprocess
+from concurrent.futures import ThreadPoolExecutor
+edl = json.load(open(sys.argv[1])); out = sys.argv[2]; os.makedirs(out, exist_ok=True)
+seg_dir = os.path.join(out, "segs"); os.makedirs(seg_dir, exist_ok=True)
+W, H = edl.get("w", 2560), edl.get("h", 1440); fx, fy = edl.get("face", [0.5, 0.45])
+vertical = edl.get("vertical", False)
+TY = edl.get("face_target_y", 0.40 if edl.get("vertical") else None)
+
+SW, SH = edl.get("src_w", 2560), edl.get("src_h", 1440)
+E = "\\"
+FX0, FY0 = fx, fy
+def vf_for(z, face=None, track=None):
+    fx, fy = face if face else (FX0, FY0)
+    TX = track_expr(track) if (vertical and track) else None
+    # static: crop a window centred on the face; dynamic (dict): subpixel animated zoom via perspective
+    if not isinstance(z, dict):
+        if vertical:
+            cw, ch = f"ih*9/16/{z}", f"ih/{z}"
+        else:
+            cw, ch = f"iw/{z}", f"ih/{z}"
+        x = f"max(0{E},min(iw-{cw}{E},iw*({TX if TX else fx})-{cw}/2))"; y = f"max(0{E},min(ih-{ch}{E},ih*{fy}-{ch}*{TY if TY is not None else fy}))"
+        return f"crop={cw}:{ch}:{x}:{y},scale={W}:{H}:flags=lanczos,setsar=1,fps=30"
+    a, b, t0, t1 = z["a"], z["b"], z["t0"], max(z["t1"], z["t0"] + 0.05)
+    pre = ""
+    rfx, rfy = fx, fy
+    if vertical:
+        rw = int(SH * 9 / 16) // 2 * 2
+        rx = int(min(max(fx * SW - rw / 2, 0), SW - rw)) // 2 * 2
+        if TX:
+            pre = f"crop={rw}:{SH}:max(0{E},min({SW - rw}{E},({TX})*{SW}-{rw / 2})):0,"; rfx = 0.5
+        else:
+            pre = f"crop={rw}:{SH}:{rx}:0,"; rfx = (fx * SW - rx) / rw
+    Z = f"st(0{E},clip((in/30-{t0:.3f})/{t1 - t0:.3f}{E},0{E},1)){E};st(1{E},{a}+({b}-{a})*ld(0)*ld(0)*(3-2*ld(0))){E};"
+    X0 = f"{Z}clip({rfx:.4f}*W-W/ld(1)/2{E},0{E},W-W/ld(1))"
+    X1 = f"{X0}+W/ld(1)"
+    Y0 = f"{Z}clip({rfy:.4f}*H-H/ld(1)*{TY if TY is not None else rfy:.4f}{E},0{E},H-H/ld(1))"
+    Y1 = f"{Y0}+H/ld(1)"
+    persp = f"perspective=x0={X0}:y0={Y0}:x1={X1}:y1={Y0}:x2={X0}:y2={Y1}:x3={X1}:y3={Y1}:interpolation=cubic:eval=frame"
+    return f"{pre}fps=30,{persp},scale={W}:{H}:flags=lanczos,setsar=1"
+
+
+def track_expr(track, var="t"):
+    """piecewise-linear centre x (0..1) as ffmpeg expression; commas escaped for the filtergraph"""
+    if not track: return None
+    e = f"{track[-1][1]}"
+    for (t0, x0), (t1, x1) in reversed(list(zip(track, track[1:]))):
+        e = f"if(lt({var}{E},{t1}){E},{x0}+({x1}-{x0})*({var}-{t0})/{max(t1 - t0, 0.001)}{E},{e})"
+    return f"if(lt({var}{E},{track[0][0]}){E},{track[0][1]}{E},{e})"
+
+def zkey(z):
+    return z if not isinstance(z, dict) else f"{z['a']}-{z['b']}-{z['t0']:.2f}-{z['t1']:.2f}"
+
+def cut(i_s):
+    i, s = i_s
+    dst = os.path.join(seg_dir, f"{i:04d}_{s['in']:.3f}_{s['out']:.3f}_{zkey(s.get('zoom',1.0))}_{'-'.join(str(v) for v in s.get('face', []))}{'_tr' + __import__('hashlib').md5(str(s.get('track')).encode()).hexdigest()[:6] if s.get('track') else ''}.mkv")
+    if os.path.exists(dst): return dst
+    d = s["out"] - s["in"]; f = min(0.012, d / 4)
+    af = f"afade=t=in:d={f},afade=t=out:st={d - f:.3f}:d={f},aresample=48000"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{s['in']:.3f}", "-i", edl["sources"][s["src"]], "-t", f"{d:.3f}",
+                    "-vf", vf_for(s.get("zoom", 1.0), s.get("face"), s.get("track")), "-af", af, "-c:v", "libx264", "-preset", "veryfast", "-crf", "12",
+                    "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", "-ac", "1", dst], check=True)
+    return dst
+
+with ThreadPoolExecutor(6) as ex:
+    files = list(ex.map(cut, enumerate(edl["segments"])))
+lst = os.path.join(out, "concat.txt")
+open(lst, "w").write("".join(f"file '{os.path.abspath(p)}'\n" for p in files))
+rough = os.path.join(out, "rough.mkv")
+subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", lst, "-c", "copy", rough], check=True)
+
+# stage 2
+inputs = ["-i", rough]; fc = []
+grade = edl.get("grade", "eq=contrast=1.04:saturation=1.07:gamma=0.98,unsharp=5:5:0.35")
+tail = edl.get("tail", 0)
+body = sum(sg["out"] - sg["in"] for sg in edl["segments"])
+pbar = (f",drawbox=x=0:y=ih-8:w=iw*min(t/{body:.3f}\\,1):h=8:color=0x2de2c4@0.85:t=fill:enable=lt(t\\,{body:.3f})" if edl.get("progress") else "")
+fc.append(f"[0:v]{grade}" + (f",tpad=stop_mode=clone:stop_duration={tail}" if tail else "") + pbar + "[v0]")
+last = "v0"
+# picture-in-picture: face cam in the corner on top of full-screen slides
+pips = [o for o in edl.get("overlays", []) if o.get("pip")]
+pip_inputs = []
+if pips:
+    fc.append(f"[{last}]split=2[vbase][pipsrc]"); last = "vbase"
+    PS = edl.get("pip_size", 600); M = 72
+    cx, cy = fx * SW, fy * SH; cs = int(SH * 0.62) // 2 * 2
+    px0 = int(min(max(cx - cs / 2, 0), SW - cs)); py0 = int(min(max(cy - cs * 0.42, 0), SH - cs))
+    fc.append(f"[pipsrc]crop={cs}:{cs}:{px0}:{py0},scale={PS}:{PS}:flags=lanczos,format=yuva444p[pf]")
+    pip_en = "+".join(f"between(t{E},{o['at'] + 0.25:.3f}{E},{o['at'] + o['dur'] - 0.3:.3f})" for o in pips)
+    pip_x, pip_y = W - PS - M, H - PS - M - 20
+for k, o in enumerate(edl.get("overlays", [])):
+    inputs += ["-itsoffset", f"{o['at']:.3f}", "-i", o["file"]]
+    sc = f"scale={W}:{H}," if vertical else ""
+    fc.append(f"[{k+1}:v]{sc}format=yuva444p10le[g{k}]")
+    fc.append(f"[{last}][g{k}]overlay=eof_action=pass:format=auto[v{k+1}]"); last = f"v{k+1}"
+if pips:
+    nimg = len(inputs) // 2 if False else None
+    inputs += ["-loop", "1", "-i", "/home/kamil-jan/video-pipeline/gfx/pip_mask.png", "-loop", "1", "-i", "/home/kamil-jan/video-pipeline/gfx/pip_frame.png"]
+    i_mask = 1 + len(edl.get("overlays", [])); i_frame = i_mask + 1
+    fc.append(f"[{i_mask}:v]format=gray,scale={PS}:{PS}[pm]")
+    fc.append("[pf][pm]alphamerge[pip]")
+    fc.append(f"[{last}][{i_frame}:v]overlay={pip_x - 40}:{pip_y - 40}:enable={pip_en}:shortest=1[vpf]")
+    fc.append(f"[vpf][pip]overlay={pip_x}:{pip_y}:enable={pip_en}:shortest=1[vpp]"); last = "vpp"
+if edl.get("subs"):
+    fc.append(f"[{last}]subtitles='{edl['subs']}':force_style='{edl.get('sub_style','')}'[vs]"); last = "vs"
+audio = edl.get("audio", "highpass=f=70,afftdn=nf=-30,acompressor=threshold=-20dB:ratio=3:attack=10:release=150:makeup=2,loudnorm=I=-14:TP=-1.0:LRA=9")
+va = f"[0:a]{audio},aresample=48000" + (f",apad=pad_dur={tail}" if tail else "")
+if edl.get("music"):
+    nin = sum(1 for a in inputs if a == "-i")
+    inputs += ["-i", edl["music"], "-i", edl["sfx"]]
+    fc.append(va + ",asplit=2[vm][vsc]")
+    fc.append(f"[{nin}:a]aresample=48000,volume={edl.get('music_db', -13)}dB[mu]")
+    fc.append("[mu][vsc]sidechaincompress=threshold=0.015:ratio=6:attack=30:release=500:makeup=1[mud]")
+    fc.append(f"[{nin+1}:a]aresample=48000,volume={edl.get('sfx_db', -12)}dB[sx]")
+    fc.append("[vm][mud][sx]amix=inputs=3:normalize=0:duration=first,alimiter=limit=0.89[a]")
+else:
+    fc.append(va + "[a]")
+final = os.path.join(out, edl.get("out_name", "final.mp4"))
+subprocess.run(["ffmpeg", "-v", "error", "-y", *inputs, "-filter_complex", ";".join(fc), "-map", f"[{last}]", "-map", "[a]",
+                "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "256k", "-ac", "2",
+                "-movflags", "+faststart", final], check=True)
+print("OK", final)

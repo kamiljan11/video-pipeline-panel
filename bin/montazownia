@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Montażownia: panel montażowy pipeline'u.  Użycie: montazownia <katalog work projektu> [--port 8790] [--no-browser]
+DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+cd "$DIR" && exec "$DIR/.venv/bin/python" -m montazownia.server "$@"

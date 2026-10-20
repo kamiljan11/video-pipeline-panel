@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""critic.py plan.json [--fix]  — quality gate ("krytyk") + rule-based fixer ("poprawiacz").
+Run from the work dir after build_edl (+ optionally after render: pass --video path).
+Checks (thresholds from research, see SKILL.md):
+  C1 static stretch: >40 s (long) / >7 s (short) without a visual event (gfx, slide, emphasis zoom, zoom change on cut)
+  C2 overlay collisions: two overlays at once; side box during zoom>1.0; slide without pip
+  C3 hook: long - first visual event within 15 s; short - visual change within 1.5 s
+  C4 shot length: shots <1.0 s in a row (>=3) = choppy
+  C5 captions: SRT line <=42 chars, display >=0.83 s; ASS (shorts) words/group <=3, MarginV in safe band
+  C6 end screen: long tail >=5 s (YouTube end screen needs 5-20 s)
+  C7 loudness (needs --video): integrated -14 +-1 LUFS, true peak <= -1 dBTP
+  C8 text integrity (needs --video): re-transcribe and diff vs kept transcript (missing >=2 words = clipped speech)
+  C9 claims: every overlay text containing digits/% must be listed in plan["verified_claims"]
+--fix applies safe automatic fixes to plan.json (adds emphasis zooms in static stretches, extends tail) and reports the rest."""
+import json, sys, re, subprocess, os
+args = sys.argv[1:]; plan_p = args[0]; FIX = "--fix" in args
+video = args[args.index("--video") + 1] if "--video" in args else None
+P = json.load(open(plan_p)); E = json.load(open(P["edl_out"]))
+W = json.load(open(P["words"]))["transcription"]
+specs = {s["id"]: s for s in json.load(open(P["gfx_specs"]))} if P.get("gfx_specs") else {}
+short = bool(P.get("vertical")); issues = []; fixes = []
+segs = E["segments"]; total = sum(s["out"] - s["in"] for s in segs)
+def add(code, sev, msg, **kw): issues.append(dict(code=code, sev=sev, msg=msg, **kw))
+# visual events timeline
+ev = []; acc = 0.0; prevz = None
+for s in segs:
+    z = s["zoom"]; zb = z["a"] if isinstance(z, dict) else z
+    if prevz is not None and zb != prevz: ev.append((acc, "zoomcut"))
+    if isinstance(z, dict) and z["t0"] > 0.01: ev.append((acc + z["t0"], "emph"))
+    if isinstance(z, dict) and z["t0"] <= 0.01: ev.append((acc, "drift"))
+    prevz = z["b"] if isinstance(z, dict) else z; acc += s["out"] - s["in"]
+for o in E.get("overlays", []): ev.append((o["at"], "gfx:" + o["id"]))
+ev.sort()
+strong = [t for t, k in ev if k != "drift"]
+# C1
+lim = 7.0 if short else 40.0; pts = [0.0] + strong + [total]
+for a, b in zip(pts, pts[1:]):
+    if b - a > lim: add("C1", "warn", f"{b - a:.1f}s bez mocnego wydarzenia wizualnego ({a:.1f}-{b:.1f}s)", at=a, end=b)
+# C2
+ov = sorted(E.get("overlays", []), key=lambda o: o["at"])
+for x, y in zip(ov, ov[1:]):
+    if y["at"] < x["at"] + x["dur"] - 0.05 and specs.get(x["id"], {}).get("type") != "end":
+        add("C2", "error", f"nakładanie grafik {x['id']} i {y['id']} ({y['at']:.1f}s)")
+acc = 0.0
+for s in segs:
+    d = s["out"] - s["in"]; z = s["zoom"]
+    for o in ov:
+        if specs.get(o["id"], {}).get("type") not in ("kw", "list", "slide"): continue
+        a0, a1 = max(acc, o["at"]), min(acc + d, o["at"] + o["dur"])  # overlap window in output time
+        if a1 <= a0: continue
+        if isinstance(z, dict):  # zoom value only during the overlap: a before t0, rising to b after
+            zz = z["a"] if acc + z["t0"] >= a1 else max(z["a"], z["b"])
+        else: zz = z
+        if zz > 1.001: add("C2", "error", f"zoom {zz} pod ramką {o['id']} ({a0:.1f}s)")
+    acc += d
+# C3
+first = strong[0] if strong else total
+if not short and first > 15: add("C3", "warn", f"pierwsze wydarzenie wizualne dopiero w {first:.1f}s (hak)")
+if short and first > 1.5: add("C3", "warn", f"short: brak zmiany obrazu w 1.5 s (pierwsza w {first:.1f}s)")
+# C4
+run = 0
+for s in segs:
+    run = run + 1 if s["out"] - s["in"] < 1.0 else 0
+    if run >= 3: add("C4", "warn", f"3+ ujęcia <1 s pod rząd przy {s['in']:.1f}s źródła"); run = 0
+# C5
+if P.get("srt_out") and os.path.exists(P["srt_out"]):
+    blocks = open(P["srt_out"]).read().strip().split("\n\n")
+    for bl in blocks:
+        ln = bl.split("\n")
+        if len(ln) < 3: continue
+        a, b = [sum(float(x) * m for x, m in zip(t.replace(",", ".").split(":"), (3600, 60, 1))) for t in ln[1].split(" --> ")]
+        for t in ln[2:]:
+            if len(t) > 42: add("C5", "warn", f"napis >42 znaków: {t[:50]}")
+        if b - a < 0.83: add("C5", "info", f"napis krótszy niż 0.83 s: {ln[2][:40]}")
+if short and P.get("ass_out") and os.path.exists(P["ass_out"]):
+    a = open(P["ass_out"]).read()
+    mv = int(re.search(r"Style: Cap,[^\n]*,(\d+),1\n", a).group(1)) if re.search(r"Style: Cap,[^\n]*,(\d+),1\n", a) else None
+    if mv is not None and not (480 <= 1920 - mv - 90 <= 1380 and mv >= 300): add("C5", "warn", f"napisy poza bezpieczną strefą (MarginV={mv})")
+# C6
+if not short and E.get("tail", 0) < 5:
+    add("C6", "warn", "brak min. 5 s ekranu końcowego")
+    if FIX: P["tail"] = 8; fixes.append("tail=8")
+# C9
+ok = set(P.get("verified_claims", []))
+for o in ov:
+    sp = specs.get(o["id"], {}); txt = " ".join(str(sp.get(k, "")) for k in ("text", "sub", "html"))
+    if re.search(r"\d", re.sub(r"<[^>]+>|animation[^;\"]*|\d+(\.\d+)?(px|s|%;)", "", txt)) and o["id"] not in ok:
+        add("C9", "error", f"grafika {o['id']} zawiera liczby, brak w verified_claims")
+# C7/C8
+if video:
+    out = subprocess.run(["ffmpeg", "-i", video, "-af", "ebur128=peak=true:framelog=quiet", "-f", "null", "-"], capture_output=True, text=True).stderr
+    I = re.findall(r"I:\s+(-?[\d.]+) LUFS", out); Pk = re.findall(r"Peak:\s+(-?[\d.]+) dBFS", out)
+    if I and abs(float(I[-1]) + 14) > 1: add("C7", "warn", f"głośność {I[-1]} LUFS (cel -14±1)")
+    if Pk and float(Pk[-1]) > -1: add("C7", "error", f"szczyt {Pk[-1]} dBFS (> -1)")
+    exp = P["edl_out"].replace(".json", ".txt")
+    r = subprocess.run([sys.executable, "/home/kamil-jan/video-pipeline/verify_cut.py", exp, video], capture_output=True, text=True).stdout
+    for line in r.splitlines():
+        if line.startswith("MISSING?"): add("C8", "error", line)
+        if line.startswith("expected"): add("C8", "info", line)
+# fixer: add emphasis zoom in long static stretches (pick sentence start nearest the middle)
+if FIX:
+    for it in [i for i in issues if i["code"] == "C1"]:
+        mid = (it["at"] + it["end"]) / 2; acc = 0.0; best = None
+        for s in segs:
+            d = s["out"] - s["in"]
+            if acc <= mid <= acc + d: tsrc = s["in"] + (mid - acc); break
+            acc += d
+        else: continue
+        used = {e.get("word", e.get("near")) for e in P.get("emph", [])}
+        kept_idx = {i for k in P["keeps"] for i in range(k[0], k[1] + 1)}
+        # candidates: kept words inside this stretch, prefer sentence starts / longer content words, never reuse
+        cands = [k for k, w in enumerate(W) if k in kept_idx and k not in used and abs(w["offsets"]["from"] / 1000 - tsrc) < (it["end"] - it["at"]) / 2 - 1]
+        def score(k):
+            ss = 0 if (k and re.search(r"[.?!,]$", W[k - 1]["text"].strip())) else 1
+            return (ss, -len(W[k]["text"].strip()), abs(W[k]["offsets"]["from"] / 1000 - tsrc))
+        if cands:
+            k = min(cands, key=score)
+            P.setdefault("emph", []).append({"word": k, "amt": 0.15 if not short else 0.1, "auto": True})
+            fixes.append(f"emph @word {k} '{W[k]['text'].strip()}' ({mid:.0f}s)")
+    if fixes: json.dump(P, open(plan_p, "w"), ensure_ascii=False)
+sev = {"error": 0, "warn": 0, "info": 0}
+for i in issues: sev[i["sev"]] += 1
+print(f"KRYTYK {os.path.basename(plan_p)}: {sev['error']} błędów, {sev['warn']} ostrzeżeń, {sev['info']} info; długość {total:.1f}s")
+for i in issues: print(f" [{i['code']}/{i['sev']}] {i['msg']}")
+for f in fixes: print(" FIX:", f)
+sys.exit(1 if sev["error"] else 0)

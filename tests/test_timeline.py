@@ -1,0 +1,62 @@
+"""timeline.py on a synthetic EDL: output time, punch-ins the head clamp flattened, SFX marks, critic markers."""
+import unittest
+
+from montazownia import timeline
+
+# two shots: source 10-14 s (static) and 20-26 s (punch-in ramp at 1.0 s into the shot)
+EDL = {"segments": [{"in": 10.0, "out": 14.0, "zoom": 1.0},
+                    {"in": 20.0, "out": 26.0, "zoom": {"a": 1.0, "b": 1.2, "t0": 1.0, "t1": 1.3}}],
+       "overlays": [{"id": "g1", "at": 2.0, "dur": 3.0}, {"id": "g2", "at": 6.0, "dur": 2.0}], "tail": 5}
+SPECS = {"g1": {"id": "g1", "type": "kw", "text": "95%"}, "g2": {"id": "g2", "type": "list", "items": ["a", "b"], "delays": [0.5, 1.0]}}
+
+
+def word(text, ms):
+    return {"text": text, "offsets": {"from": ms, "to": ms + 300}}
+
+
+class TimelineTest(unittest.TestCase):
+    def test_src2out_walks_the_kept_shots(self):
+        segs = EDL["segments"]
+        self.assertEqual(timeline.src2out(segs, 12.0), 2.0)
+        self.assertEqual(timeline.src2out(segs, 21.0), 5.0)
+        self.assertEqual(timeline.src2out(segs, 16.0), 4.0)  # in a cut: start of the next shot
+        self.assertEqual(timeline.src2out(segs, 99.0), 10.0)
+
+    def test_zoom_kinds(self):
+        self.assertEqual([timeline.zoom_kind(z) for z in (1.0, 1.1, {"a": 1, "b": 1.1, "t0": 0, "t1": 4}, EDL["segments"][1]["zoom"])],
+                         ["static", "zoom", "drift", "emph"])
+
+    def test_dead_punch_in_is_flagged(self):
+        words = [word("raz", 11000), word("dwa", 21000)]
+        plan = {"keeps": [[0, 1]], "emph": [{"word": 0}, {"word": 1}]}
+        view = timeline.words_view(plan, words, EDL)
+        # word 0 sits in the static shot: build_edl/face_track left no ramp there
+        self.assertEqual([(w["emph"], w["emph_live"], w["out"]) for w in view], [(0, False, 1.0), (1, True, 5.0)])
+        self.assertIsNone(timeline.words_view(plan, words, None)[0]["emph_live"])
+
+    def test_sfx_follow_graphics_and_ramps(self):
+        ev = [(e["t"], e["kind"]) for e in timeline.sfx_events(EDL, SPECS)]
+        self.assertEqual(ev, [(2.03, "pop"), (4.95, "whoosh"), (6.0, "whoosh"), (6.55, "pop"), (7.05, "pop")])
+
+    def test_issue_time_from_every_message_format(self):
+        cases = [({"code": "C1", "msg": "12.3s bez mocnego wydarzenia", "at": 3.5}, 3.5),
+                 ({"code": "C2", "msg": "nakładanie grafik g1 i g2 (6.0s)"}, 6.0),
+                 ({"code": "C3", "msg": "short: brak zmiany obrazu w 1.5 s (pierwsza w 2.4s)"}, 2.4),
+                 ({"code": "C4", "msg": "3+ ujęcia <1 s pod rząd przy 21.0s źródła"}, 5.0),
+                 ({"code": "C6", "msg": "brak min. 5 s ekranu końcowego"}, 15.0),
+                 ({"code": "C9", "msg": "grafika g2 zawiera liczby, brak w verified_claims"}, 6.0),
+                 ({"code": "C7", "msg": "głośność -16 LUFS (cel -14±1)"}, None)]
+        for issue, t in cases:
+            with self.subTest(issue["code"]):
+                self.assertEqual(timeline.issue_time(issue, EDL, 15.0), t)
+
+    def test_build_totals_and_defaults(self):
+        tl = timeline.build({"keeps": [[0, 0]]}, [word("raz", 11000)], list(SPECS.values()), EDL, [{"code": "C6", "msg": "x"}])
+        self.assertEqual((tl["body"], tl["total"], tl["issues"][0]["t"]), (10.0, 15.0, 15.0))
+        self.assertEqual(tl["music"], {"seed": 7, "db": -13, "sfx_db": -12, "file": None})  # same defaults as build_edl/assemble
+        self.assertEqual(tl["overlays"][1]["text"], ["a", "b"])
+        self.assertFalse(timeline.build({"keeps": []}, [], [], None, None)["ready"])
+
+
+if __name__ == "__main__":
+    unittest.main()
