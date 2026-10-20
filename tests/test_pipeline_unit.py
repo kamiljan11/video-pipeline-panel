@@ -207,17 +207,6 @@ class UnfinishedRunTest(Tmp):
         self.assertFalse((self.gfx / "g2.mov").exists())
         self.assertTrue((self.gfx / "g1.mov").exists())
 
-    def test_stop_after_the_film_was_assembled_keeps_the_segs(self):
-        rsegs = self.tmp / "f" / "segs"
-        rsegs.mkdir(parents=True)
-        steps = self.render(self.work)
-        self.start(steps)
-        (rsegs / "0001_done.mkv").write_text("complete")
-        self.log("DONE f\n")  # Stop came in the critic --video after this line
-        self.start(self.render(self.work))
-        self.assertEqual([q.name for q in rsegs.iterdir()], ["0001_done.mkv"])
-        self.assertIn("po złożeniu", " ".join(self.job.lines))
-
     def test_marker_that_is_not_an_object_is_unfinished(self):
         self.run_cut_short()
         self.marker.write_text("[]")

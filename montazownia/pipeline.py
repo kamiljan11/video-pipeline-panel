@@ -43,12 +43,11 @@ def critic_report(work: Path, film: str) -> Path:
     return scratch(work, f"critic_{film}.json")
 
 
-def unfinished_guard(work: Path, marker: Path, segs: Path | None, specs: str | None,
-                     note: Callable[[], dict] | None = None, completed: Callable[[dict], bool] | None = None) -> tuple[PyStep, PyStep]:
+def unfinished_guard(work: Path, marker: Path, segs: Path | None, specs: str | None) -> tuple[PyStep, PyStep]:
     """Steps around a run whose Stop / limit / crash would leave files cut short under their final names, which the
     pipeline then reuses (assemble.py keeps segs/*.mkv, gfx/render.mjs keeps <id>.mov). The marker is removed only when
     the run finishes; if it is still there, the next run first drops what the unfinished one may have cut.
-    `note` adds fields to the marker; `completed(marker)` says the unfinished run got past the risky part after all."""
+    No "it got far enough" shortcut: render.log is shared by every project, so a "DONE" in it proves nothing about this run."""
     gdir = work / "gfx"
 
     def begin(job: Job) -> None:
@@ -59,19 +58,16 @@ def unfinished_guard(work: Path, marker: Path, segs: Path | None, specs: str | N
             except (OSError, ValueError):  # cut short itself: still an unfinished run, only the gfx list is lost
                 left = {}
             left = left if isinstance(left, dict) else {}
-            if completed and completed(left):
-                job.say("poprzednie uruchomienie zatrzymane po złożeniu filmu: pliki zostają")
-            else:
-                cut = [q for q in segs.glob("*.mkv") if q.stat().st_mtime >= since] if segs and segs.is_dir() else []
-                for q in cut:  # written during the unfinished run: one of them may be cut short (6 in parallel)
-                    q.unlink(missing_ok=True)
-                ids = left.get("gfx", []) if isinstance(left.get("gfx"), list) else []
-                gone = [gid for gid in ids if FILM_NAME.fullmatch(str(gid)) and retire_gfx_file(work, gdir / f"{gid}.mov")]
-                job.say(f"poprzednie uruchomienie się nie skończyło: usuwam {len(cut)} ujęć i {len(gone)} grafik do ponownego renderu")
+            cut = [q for q in segs.glob("*.mkv") if q.stat().st_mtime >= since] if segs and segs.is_dir() else []
+            for q in cut:  # written during the unfinished run: one of them may be cut short (6 in parallel)
+                q.unlink(missing_ok=True)
+            ids = left.get("gfx", []) if isinstance(left.get("gfx"), list) else []
+            gone = [gid for gid in ids if FILM_NAME.fullmatch(str(gid)) and retire_gfx_file(work, gdir / f"{gid}.mov")]
+            job.say(f"poprzednie uruchomienie się nie skończyło: usuwam {len(cut)} ujęć i {len(gone)} grafik do ponownego renderu")
         sp = work / specs if specs else None
         missing = [g["id"] for g in read_json(sp) if not (gdir / f"{g['id']}.mov").exists()] if sp and sp.exists() else []
         marker.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write(marker, json.dumps({"gfx": missing, **(note() if note else {})}))
+        atomic_write(marker, json.dumps({"gfx": missing}))
 
     def end(job: Job) -> None:
         marker.unlink(missing_ok=True)
@@ -90,7 +86,7 @@ def done_in_log(log: Path, film: str, at: int) -> bool:
         with open(log, encoding="utf-8", errors="replace") as f:
             f.seek(at)
             return f"DONE {film}" in f.read().splitlines()
-    except OSError:
+    except (OSError, ValueError):  # missing log, or an offset that is not a position in it
         return False
 
 
@@ -192,9 +188,7 @@ def render_steps(work: Path, film: str, out_dir: Path) -> list[Step]:
 
     # run_v4.sh assembles into render/<film>/segs, shared by every project with a film of that name: the segs marker sits
     # there; it renders gfx_specs.json into work/gfx, which is this project's: that marker is per project
-    segs_begin, segs_end = unfinished_guard(work, RENDER / film / "panel-unfinished.json", RENDER / film / "segs", None,
-                                            note=lambda: {"log_at": start["at"]},
-                                            completed=lambda m: isinstance(m.get("log_at"), int) and done_in_log(log, film, m["log_at"]))
+    segs_begin, segs_end = unfinished_guard(work, RENDER / film / "panel-unfinished.json", RENDER / film / "segs", None)
     gfx_begin, gfx_end = unfinished_guard(work, gfx_marker(work), None, "gfx_specs.json")
 
     def finished(job: Job) -> None:
