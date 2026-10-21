@@ -56,8 +56,11 @@ def broll_view(edl: dict, plan: dict) -> list[dict]:
     """Stock b-roll where build_edl.py placed it; pos = index in plan["broll"] (for removal), credits per clip."""
     got = plan.get("broll")
     own: list = got if isinstance(got, list) else []  # plans arrive via Syncthing: any shape
-    pos = {b.get("word"): k for k, b in enumerate(own) if isinstance(b, dict)}
-    items = {b.get("word"): b for b in own if isinstance(b, dict)}
+    pos: dict[int, int] = {}
+    for k, b in enumerate(own):  # the first entry of a word wins, as in broll.place (later ones collide and are dropped)
+        if isinstance(b, dict) and type(b.get("word")) is int:
+            pos.setdefault(b["word"], k)
+    items = {w: own[k] for w, k in pos.items()}
     res = []
     for b in edl.get("broll", []):
         it = items.get(b["word"], {})

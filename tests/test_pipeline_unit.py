@@ -303,7 +303,7 @@ class BrollStepsTest(Tmp):
         self.assertEqual(json.loads((self.work / "plan_f.json").read_text()), self.plan)
 
     def test_odd_plan_shape_still_collects(self):
-        (self.work / "plan_f.json").write_text(json.dumps({**self.plan, "broll": None}))
+        (self.work / "plan_f.json").write_text(json.dumps({**self.plan, "broll": [{"word": [1]}, {"word": {"a": 1}}, None]}))
         prepare, cmd, collect = self.steps()
         prepare(self.job)
         Path(cmd.argv[-1]).write_text(json.dumps({"broll": [{"word": 3, "said": "a"}], "new": 1}))

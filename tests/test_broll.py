@@ -383,6 +383,14 @@ class PreviewAndTimelineTest(unittest.TestCase):
         v = timeline.broll_view(EDL, plan)
         self.assertEqual([(b["pos"], b["said"], b["start"], b["end"]) for b in v], [(1, "faktury", 8.0, 11.0), (0, "magazyn", 25.0, 27.5)])
 
+    def test_timeline_survives_odd_plans_and_points_at_the_placed_entry(self):
+        for odd in ([{"word": [1]}, {"word": {"a": 1}}, "x", {"word": True}], None, 5):
+            with self.subTest(broll=odd):
+                self.assertEqual([b["pos"] for b in timeline.broll_view(EDL, {"broll": odd})], [None, None])
+        two = {"broll": [{"word": 20, "said": "first"}, {"word": 20, "said": "second"}]}  # place() keeps the first
+        first = timeline.broll_view(EDL, two)[0]
+        self.assertEqual((first["pos"], first["said"]), (0, "first"))
+
 
 if __name__ == "__main__":
     unittest.main()

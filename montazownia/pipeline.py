@@ -185,7 +185,7 @@ def broll_steps(work: Path, film: str) -> list[Step]:
             raise StepFailed("broll.py nie zapisał propozycji (szczegóły w logu)")
         prop = read_json(out)
         own = json.loads(job.result["base"]).get("broll")  # any shape (Syncthing): never a TypeError after the downloads
-        had = {b.get("word") for b in own if isinstance(b, dict)} if isinstance(own, list) else set()
+        had = {b["word"] for b in own if isinstance(b, dict) and type(b.get("word")) is int} if isinstance(own, list) else set()
         job.result.update({"proposal": prop, "summary": {
             "broll": len(prop.get("broll", [])), "new": prop.get("new", 0), "format": prop.get("format"), "error": prop.get("error"),
             "items": [{"said": b.get("said", ""), "query": b.get("query", ""), "author": b.get("author", ""), "new": b.get("word") not in had}
