@@ -250,6 +250,87 @@ class CompatTest(unittest.TestCase):
         self.assertNotIn(f[55], (f[1], f[25]))  # second punch, after the snap back
         self.assertEqual(f[55], f[60])
 
+    def broll_edl(self, items, **extra):
+        """EDL of the sample with plan["broll"]; clips are looked up in a temp cache (VP_BROLL_DIR), never render/broll."""
+        self.write_plan({**self.plan, "broll": items, **extra})
+        r = self.run_script(PIPE, "build_edl.py", f"plan_{FILM}.json", env={**os.environ, "VP_BROLL_DIR": str(self.cache)})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads((self.work / self.plan["edl_out"]).read_text())
+
+    def broll_setup(self):
+        self.cache = self.tmp / "broll"
+        self.cache.mkdir()
+        self.clip = self.cache / "pexels_1_1080x1920.mp4"
+        self.clip.write_bytes(b"x")
+        outside = self.tmp / "outside.mp4"
+        outside.write_bytes(b"x")
+        (self.cache / "link.mp4").symlink_to(outside)  # a link out of the cache is a file outside it
+        self.write_plan(self.plan)
+        segs = json.loads(self.edl_from(PIPE)[0])["segments"]
+        words = json.loads((self.work / self.plan["words"]).read_text())["transcription"]
+        starts = [w["offsets"]["from"] / 1000 for w in words]
+        kept = [i for i, t in enumerate(starts) if any(s["in"] <= t <= s["out"] for s in segs)]
+        cut = next(i for i in range(kept[0], kept[-1]) if i not in kept)
+        return segs, starts, kept, cut, outside
+
+    def test_broll_key_places_clips_and_drops_unsafe_or_colliding_ones(self):
+        segs, starts, kept, cut, outside = self.broll_setup()
+        total = sum(s["out"] - s["in"] for s in segs)
+        def out_t(i):
+            acc = 0.0
+            for s in segs:
+                if s["in"] <= starts[i] <= s["out"]:
+                    return acc + starts[i] - s["in"]
+                acc += s["out"] - s["in"]
+            raise AssertionError(i)
+        free, card = (next(i for i in kept if lo < out_t(i) < lo + 5) for lo in (8.0, 25.0))
+        clip = {"file": str(self.clip), "dur": 2.5, "lead": 0.0, "query": "q", "clip_dur": 10.0}
+        items = [{**clip, "word": free}, {**clip, "word": cut}, {**clip, "word": card},
+                 {**clip, "word": free, "file": str(outside)}, {**clip, "word": free, "file": str(self.cache / "link.mp4")},
+                 {**clip, "word": free, "dur": 99}, {"word": "1"}, "x"]
+        (self.work / "specs.json").write_text(json.dumps([{"id": "k1", "type": "kw", "dur": 3.0, "canvas": "v"}]))
+        edl = self.broll_edl(items, gfx_specs="specs.json", gfx_dir=str(self.work / "gfx"), gfx=[{"id": "k1", "word": card}])
+        self.assertEqual(edl["broll"], [{"file": str(self.clip), "at": round(out_t(free), 3), "dur": 2.5, "ss": 1.0, "word": free,
+                                         "query": "q", "id": f"broll_{free}"}])
+        self.assertLess(edl["broll"][0]["at"] + 2.5, total)
+        reasons = sorted(s["reason"] for s in edl["broll_skipped"])
+        self.assertEqual(reasons, sorted(["słowo wycięte", "pod grafiką", "brak pliku b-rollu w render/broll",
+                                          "brak pliku b-rollu w render/broll", "zły czas b-rollu", "zły wpis b-rollu", "zły wpis b-rollu"]))
+        r = self.run_script(PIPE, "critic.py", f"plan_{FILM}.json", "--json", str(self.tmp / "c.json"))
+        self.assertIn(r.returncode, (0, 1), r.stderr)
+        self.assertEqual(edl["broll_removed"], 0)
+        c11 = [i for i in json.loads((self.tmp / "c.json").read_text())["issues"] if i["code"] == "C11"]
+        self.assertEqual(len(c11), len(reasons))
+        self.assertTrue(all(i["sev"] == "warn" for i in c11))
+        said = [s.get("said") for s in edl["broll_skipped"] if isinstance(s.get("word"), int) and s["reason"] != "zły wpis b-rollu"]
+        self.assertTrue(said and all(said), edl["broll_skipped"])  # the editor sees the spoken word, not its index
+        self.assertTrue(any("„" in i["msg"] for i in c11))
+
+    def test_broll_renders_under_graphics_and_captions_without_moving_other_inputs(self):
+        kept = self.broll_setup()[2]
+        edl = self.broll_edl([{"file": str(self.clip), "dur": 2.5, "word": kept[len(kept) // 2], "query": "q"}])
+        b = edl["broll"][0]
+        self.assertEqual(b["ss"], 0.0)  # clip length unknown: play it from its start
+        p = self.tmp / "edl_b.json"
+        p.write_text(json.dumps(edl))
+        final = json.loads(self.ffmpeg_calls(PIPE, p)[-1])
+        i = final.index(str(self.clip))
+        self.assertEqual(final[i - 7:i], ["-protocol_whitelist", "file", "-f", "mov", "-t", "2.500", "-i"])  # downloaded file: MP4 only
+        fc = final[final.index("-filter_complex") + 1]
+        n_in = final.count("-i")
+        self.assertIn(f"[{n_in - 1}:v]trim=start=0.000:duration=2.500,setpts=PTS-STARTPTS+{b['at']:.3f}/TB,"
+                      "scale=1080:1920:force_original_aspect_ratio=increase", fc)  # short: no music in the sample EDL
+        self.assertLess(fc.index("[vb0]"), fc.index("subtitles="))
+        long = json.loads((SAMPLE / "edl_long.json").read_text())
+        n_ov = len(long["overlays"])
+        p2 = self.tmp / "edl_long_b.json"
+        p2.write_text(json.dumps({**long, "broll": [{**b, "file": str(self.clip)}]}))
+        fc2 = json.loads(self.ffmpeg_calls(PIPE, p2)[-1])
+        fc2 = fc2[fc2.index("-filter_complex") + 1]
+        self.assertIn(f"[{1 + n_ov}:v]format=gray", fc2)  # pip mask keeps its input number
+        self.assertRegex(fc2, rf"\[{3 + n_ov}:v\]trim=[^;]*scale={long['w']}:{long['h']}:force_original_aspect_ratio=increase")
+        self.assertLess(fc2.index("[vb0]"), fc2.index("[g0]overlay"))
+
     def ffmpeg_calls(self, root, edl_path, *flags):
         bindir = self.tmp / "bin"
         bindir.mkdir(exist_ok=True)

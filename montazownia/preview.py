@@ -82,6 +82,10 @@ def slice_edl(edl: dict, a: float, b: float) -> dict:
     body = acc
     out["segments"] = segs
     out["overlays"] = [{**o, "at": round(o["at"] - a, 3)} for o in edl.get("overlays", []) if o["at"] < b and o["at"] + o["dur"] > a and o["at"] >= a - 1e-6]
+    if "broll" in edl:  # stock b-roll: a clip cut by the window plays on from where the window starts (ss)
+        out["broll"] = [{**x, "at": round(max(x["at"], a) - a, 3), "ss": round(x.get("ss", 0.0) + max(0.0, a - x["at"]), 3),
+                         "dur": round(min(x["at"] + x["dur"], b) - max(x["at"], a), 3)}
+                        for x in edl["broll"] if min(x["at"] + x["dur"], b) - max(x["at"], a) > 0.04]
     out["tail"] = round(max(0.0, min(b, body + edl.get("tail", 0)) - max(a, body)), 3)
     out["progress"] = False  # the bar would measure the fragment, not the film
     if a > 0:

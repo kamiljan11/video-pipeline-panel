@@ -269,6 +269,56 @@ class BeatsStepsTest(Tmp):
             collect(self.job)
 
 
+class BrollStepsTest(Tmp):
+    """The "Dobierz b-roll" job: EDL rebuild, then broll.py through the Infisical bridge; collect() turns its proposal into
+    the summary the dialog shows (new = word not in the plan yet, provider error passed on); no proposal = failed job."""
+
+    def setUp(self):
+        super().setUp()
+        self.plan = {"words": "w.json", "keeps": [[0, 9]], "vertical": True, "edl_out": "edl_f.json", "broll": [{"word": 3, "query": "a"}]}
+        (self.work / "plan_f.json").write_text(json.dumps(self.plan))
+        self.job = Job(1, "broll", "f", [])
+
+    def steps(self):
+        *rebuild, prepare, cmd, collect = pipeline.broll_steps(self.work, "f")
+        assert isinstance(cmd, Cmd) and callable(prepare) and callable(collect)
+        self.assertEqual(len(rebuild), len(pipeline.rebuild_steps(self.work, "f")))  # times come from a fresh EDL
+        return prepare, cmd, collect
+
+    def test_proposal_becomes_the_dialog_summary(self):
+        prepare, cmd, collect = self.steps()
+        self.assertEqual(cmd.argv[:6], [pipeline.PY, str(pipeline.BRIDGE), "run", "--secrets", "Pexels", "--"])
+        out = Path(cmd.argv[-1])
+        prepare(self.job)
+        prop = {"broll": [{"word": 3, "said": "faktury", "query": "a", "author": "A"}, {"word": 7, "said": "magazyn", "query": "b"}],
+                "new": 1, "format": "short", "error": "Pexels: limit zapytań (200/h): spróbuj za godzinę",
+                "skipped": [{"word": 9, "said": "x", "reason": "r", "down": True}], "credits": ["B-roll: Pexels — A (u)"]}
+        out.write_text(json.dumps(prop))
+        collect(self.job)
+        m = self.job.result["summary"]
+        self.assertEqual((m["broll"], m["new"], m["format"], m["error"]), (2, 1, "short", prop["error"]))
+        self.assertEqual([(i["said"], i["new"]) for i in m["items"]], [("faktury", False), ("magazyn", True)])
+        self.assertEqual((m["skipped"], m["credits"]), (prop["skipped"], prop["credits"]))
+        self.assertEqual(self.job.result["base"], json.dumps(self.plan))  # /broll-apply refuses if the plan moved on
+        self.assertEqual(json.loads((self.work / "plan_f.json").read_text()), self.plan)
+
+    def test_odd_plan_shape_still_collects(self):
+        (self.work / "plan_f.json").write_text(json.dumps({**self.plan, "broll": None}))
+        prepare, cmd, collect = self.steps()
+        prepare(self.job)
+        Path(cmd.argv[-1]).write_text(json.dumps({"broll": [{"word": 3, "said": "a"}], "new": 1}))
+        collect(self.job)
+        self.assertEqual(self.job.result["summary"]["items"][0]["new"], True)
+
+    def test_no_proposal_fails_the_job(self):
+        prepare, cmd, collect = self.steps()
+        Path(cmd.argv[-1]).parent.mkdir(parents=True, exist_ok=True)
+        Path(cmd.argv[-1]).write_text("{}")  # left by an earlier run: prepare drops it, so it is never applied again
+        prepare(self.job)
+        with self.assertRaises(StepFailed):
+            collect(self.job)
+
+
 STUB = """import os, sys
 name = os.path.basename(sys.argv[0])
 log = os.environ["RUNV4_LOG"]
@@ -284,10 +334,10 @@ if name == "assemble.py":
 """
 
 
-@unittest.skipUnless(shutil.which("node"), "run_v4.sh starts with node gfx/render.mjs")
 class RunV4FailureTest(unittest.TestCase):
-    """run_v4.sh itself (copy with VP pointed at stub scripts): a failed step gives FAILED <step> <film> and no
-    render of the stale EDL (no DONE); the fix loop's rebuild failing skips the film too (continue 2)."""
+    """run_v4.sh itself (copy with VP pointed at stub scripts): a failed step gives FAILED <step> <film>, no render of
+    the stale EDL (no DONE) and exit 1; the fix loop's rebuild failing skips the film too (continue 2).
+    Graphics render only when the project has gfx_specs.json (node needed only for that test)."""
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="montaz-runv4-"))
@@ -310,10 +360,11 @@ class RunV4FailureTest(unittest.TestCase):
         for film in ("x", "long"):
             (self.work / f"edl_{film}.json").write_text(json.dumps({"out_name": "film.mp4"}))
 
-    def run_v4(self, film: str = "x", **env: str) -> tuple[str, str]:
+    def run_v4(self, film: str = "x", rc: int = 0, **env: str) -> tuple[str, str]:
         log = self.tmp / "calls.log"
-        subprocess.run(["bash", str(self.vp / "run_v4.sh"), str(self.work), str(self.out), film], check=True, timeout=60,
-                       env={**os.environ, "RUNV4_LOG": str(log), **env}, capture_output=True)
+        r = subprocess.run(["bash", str(self.vp / "run_v4.sh"), str(self.work), str(self.out), film], check=False, timeout=60,
+                           env={**os.environ, "RUNV4_LOG": str(log), **env}, capture_output=True, text=True)
+        self.assertEqual(r.returncode, rc, r.stderr)  # a terminal or a scheduled task sees a failed film too
         return (self.vp / "render" / "render.log").read_text(), log.read_text() if log.exists() else ""
 
     def test_all_steps_ok_renders(self):
@@ -327,11 +378,19 @@ class RunV4FailureTest(unittest.TestCase):
             with self.subTest(step=step):
                 (self.tmp / "calls.log").unlink(missing_ok=True)
                 (self.vp / "render" / "render.log").unlink(missing_ok=True)
-                render, calls = self.run_v4(**{f"FAIL_{step}": "1"})
+                render, calls = self.run_v4(rc=1, **{f"FAIL_{step}": "1"})
                 self.assertIn(f"FAILED {step} x", render)
                 self.assertNotIn("DONE x", render)
                 self.assertNotIn("assemble.py", calls)
                 self.assertIn("ALL_DONE", render)
+                self.assertIn("FAILED_FILMS x", render)
+
+    def test_failed_assemble_is_logged_and_skips_the_metric(self):
+        render, calls = self.run_v4(rc=1, FAIL_assemble="1")
+        self.assertIn("FAILED assemble x", render)
+        self.assertNotIn("DONE x", render)
+        self.assertNotIn("beatfx.py", calls)
+        self.assertFalse((self.out / "film.mp4").exists())
 
     def test_rendered_film_logs_the_metric_and_long_gets_its_otio(self):
         render, calls = self.run_v4("long")
@@ -339,14 +398,39 @@ class RunV4FailureTest(unittest.TestCase):
         self.assertIn("beatfx.py 1", calls)  # ADR-0002 metric line per render
         self.assertIn("to_otio.py 1", calls)
 
+    def test_otio_only_for_the_long_rendered_in_this_run(self):
+        _, calls = self.run_v4("x")  # edl_long.json lies in WORK from an earlier run
+        self.assertNotIn("to_otio.py", calls)
+        render, _ = self.run_v4("long", rc=1, FAIL_to_otio="1")
+        self.assertIn("FAILED to_otio long", render)
+        self.assertIn("FAILED_FILMS long", render)
+
     def test_failed_long_gets_no_otio_from_its_stale_edl(self):
-        render, calls = self.run_v4("long", FAIL_build_edl="1")
+        render, calls = self.run_v4("long", rc=1, FAIL_build_edl="1")
         self.assertIn("FAILED build_edl long", render)
         self.assertNotIn("to_otio.py", calls)
         self.assertNotIn("beatfx.py", calls)
 
+    @unittest.skipUnless(shutil.which("node"), "node not installed")
+    def test_failed_gfx_renders_no_film(self):
+        (self.work / "gfx_specs.json").write_text("[]")
+        (self.vp / "gfx" / "render.mjs").write_text("process.exit(1)")
+        render, calls = self.run_v4(rc=1)
+        self.assertIn("FAILED gfx", render)
+        self.assertIn("FAILED_FILMS x", render)
+        self.assertEqual(calls, "")  # not even build_edl: the cards are shared by every film
+
+    def test_out_name_with_a_path_is_refused(self):
+        for bad in ("../film.mp4", "sub/film.mp4", ".hidden.mp4", ""):
+            with self.subTest(out_name=bad):
+                (self.tmp / "calls.log").unlink(missing_ok=True)
+                (self.work / "edl_x.json").write_text(json.dumps({"out_name": bad}))
+                render, calls = self.run_v4(rc=1)
+                self.assertIn("FAILED out_name x", render)
+                self.assertNotIn("assemble.py", calls)
+
     def test_failed_rebuild_in_fix_loop_skips_the_render(self):
-        render, calls = self.run_v4(CRITIC_FIX="1", FAIL_build_edl="2")
+        render, calls = self.run_v4(rc=1, CRITIC_FIX="1", FAIL_build_edl="2")
         self.assertIn("FAILED build_edl x", render)
         self.assertNotIn("DONE x", render)
         self.assertNotIn("assemble.py", calls)

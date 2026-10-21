@@ -66,7 +66,7 @@ async function ask(title, value = "") {
 
 // ---------- jobs ----------
 // a button that starts a job stays disabled while a job of that kind runs (a second click would queue a copy)
-const JOB_BUTTONS = { check: "check", fix: "fix", beats: "beats", preview: "preview", render: "render" };
+const JOB_BUTTONS = { check: "check", fix: "fix", beats: "beats", broll: "broll", preview: "preview", render: "render" };
 function busy(kind, on) {
   S.running = S.running || {};
   if (on) S.running[kind] = true; else delete S.running[kind];
@@ -96,7 +96,7 @@ async function watchJob(id, onDone) {
   };
   tick();
 }
-const label = (k) => ({ rebuild: "Przeliczanie", check: "Krytyk", fix: "Poprawki", preview: "Podgląd", render: "Render", beats: "Momenty" }[k] || k);
+const label = (k) => ({ rebuild: "Przeliczanie", check: "Krytyk", fix: "Poprawki", preview: "Podgląd", render: "Render", beats: "Momenty", broll: "B-roll" }[k] || k);
 const statusPl = (s) => ({ queued: "w kolejce", running: "trwa", done: "gotowe", failed: "błąd", stopped: "zatrzymane" }[s] || s);
 
 // ---------- loading ----------
@@ -164,6 +164,10 @@ function buildItems(tl) {
       content: esc(`${o.id} · ${Array.isArray(o.text) ? o.text[0] : o.text}`), className: slide ? "g-slide" : "g-gfx",
       title: esc(`${o.type}: ${Array.isArray(o.text) ? o.text.join(" / ") : o.text}${o.pip ? " (z PiP)" : ""}`) });
   }
+  for (const [k, b] of (tl.broll || []).entries()) {
+    it.push({ id: `broll:${k}`, group: "v4", start: T(b.start), end: T(b.end), content: esc(b.query), className: "g-broll",
+      title: esc(`b-roll na „${b.said}”: ${b.query}${b.author ? ` · autor: ${b.author}` : ""}`) });
+  }
   it.push({ id: "music", group: "a2", start: T(0), end: T(tl.total), content: `muzyka (seed ${tl.music.seed}, ${tl.music.db} dB)`, className: "g-music" });
   tl.sfx.forEach((e, k) => it.push({ id: `sfx:${k}`, group: "a3", start: T(e.t), type: "point", content: e.kind, className: "g-sfx" }));
   for (const [k, b] of (tl.beats || []).entries()) {
@@ -182,7 +186,7 @@ function renderTimeline(fresh) {
   const tl = S.view.timeline;
   if (!tl.ready) { $("timeline").innerHTML = '<div class="muted" style="padding:20px">Brak EDL: kliknij „Sprawdź”, żeby zbudować oś.</div>'; S.timeline = null; return; }
   const groups = [
-    { id: "mo", content: "Momenty" }, { id: "v1", content: "V1 ujęcia" }, { id: "v2", content: "V2 grafiki" }, { id: "v3", content: "V3 slajdy+PiP" },
+    { id: "mo", content: "Momenty" }, { id: "v1", content: "V1 ujęcia" }, { id: "v2", content: "V2 grafiki" }, { id: "v3", content: "V3 slajdy+PiP" }, { id: "v4", content: "V4 b-roll" },
     { id: "a2", content: "A2 muzyka" }, { id: "a3", content: "A3 SFX" }, { id: "kr", content: "Krytyk" }];
   const items = buildItems(tl);
   if (S.timeline && !fresh) {
@@ -371,11 +375,17 @@ function num(id, v, step = 0.01, extra = "", aria = "") {
 function renderInspector() {
   S.dirty.inspector = false;
   const box = $("inspector"), id = S.sel, tl = S.view.timeline;
-  if (!id) { box.innerHTML = '<div class="muted">Kliknij element na osi albo słowo w transkrypcji.</div><div class="row"><button id="newgfx" class="ghost">+ Nowa grafika przy znaczniku</button></div>'; $("newgfx").onclick = newGfx; return; }
+  if (!id) {
+    const skipped = (tl.broll_skipped || []).map((b) => `<li>${b.said ? `„${esc(b.said)}”` : `słowo nr ${esc(String(b.word ?? "?"))}`}: ${esc(b.reason)}</li>`).join("");
+    box.innerHTML = '<div class="muted">Kliknij element na osi albo słowo w transkrypcji.</div><div class="row"><button id="newgfx" class="ghost">+ Nowa grafika przy znaczniku</button></div>'
+      + (skipped ? `<p class="badge warn">B-roll z planu, którego nie ma na osi (V4):</p><ul class="muted">${skipped}</ul>` : "");
+    $("newgfx").onclick = newGfx; return;
+  }
   if (id.startsWith("seg:")) return inspectSegment(box, tl.segments[+id.slice(4)]);
   if (id.startsWith("gfx:")) return inspectGfx(box, id.slice(4));
   if (id.startsWith("emph:")) return inspectEmph(box, +id.slice(5));
   if (id.startsWith("beat:")) return inspectBeat(box, +id.slice(5));
+  if (id.startsWith("broll:")) return inspectBroll(box, (tl.broll || [])[+id.slice(6)]);
   if (id.startsWith("pace:")) { const b = (tl.beats || [])[+id.slice(5)]; box.innerHTML = b ? `<h3>Rytm na „${esc(b.text)}”</h3><div>Długo bez żadnego zdarzenia i bez rozpoznanego momentu: delikatny najazd tylko dla rytmu. Lepsza decyzja: przytnij ten fragment albo oznacz w nim moment (Ctrl+klik w słowo).</div>` : ""; return; }
   if (id.startsWith("iss:")) { const c = tl.issues.find((x) => `iss:${x.id}` === id); box.innerHTML = c ? `<h3>${esc(c.code)} · ${SEV[c.sev] || esc(c.sev)}</h3><div>${esc(c.msg)}</div>` : ""; return; }
   if (id === "music") { S.sel = null; document.querySelector('[data-tab="t-globals"]').click(); return renderInspector(); }
@@ -489,6 +499,20 @@ function inspectBeat(box, pos) {
     select(`gfx:${id}`);
   };
   if (b.at != null) setPlayhead(b.at);
+}
+function inspectBroll(box, b) {
+  if (!b) { S.sel = null; return renderInspector(); }
+  box.innerHTML = `<h3>B-roll na „${esc(b.said || "?")}”</h3>
+  <div class="grid">${field("Szukane", esc(b.query))}${field("W filmie", `${fmt(b.start)}–${fmt(b.end)}`)}${field("Autor", esc(b.author || "–"))}${field("Źródło", esc(b.url || "–"))}</div>
+  ${b.pos != null ? `<div class="row"><button id="brdel" class="ghost">Usuń b-roll</button></div>
+  <div class="muted">Pełny kadr ujęcia stock nad twarzą; głos leci dalej, napisy i grafiki są nad nim. Pasuje źle? Usuń: ten klip i to słowo nie wrócą przy kolejnym doborze (Ctrl+Z cofa usunięcie).</div>`
+    : '<p class="badge warn">Tego klipu nie ma już w planie (oś pokazuje ostatni EDL). Kliknij „Sprawdź”, żeby przeliczyć oś.</p>'}`;
+  if ($("brdel")) $("brdel").onclick = async (ev) => {  // removal is by position: a second click must not delete the next clip
+    const btn = ev.currentTarget; btn.disabled = true;
+    try { await editOp({ op: "remove_broll", pos: b.pos }); } catch { btn.disabled = false; return; }  // error already toasted by api()
+    S.sel = null; renderInspector();
+  };
+  setPlayhead(b.start);
 }
 async function addBeat(i) {
   const types = S.view.beat_types || {}, w = S.view.timeline.words[i];
@@ -627,6 +651,30 @@ $("beats").onclick = async () => {
     if (await modal(html, [["Zastosuj", true], ["Odrzuć", false, "ghost"]])) {
       const s = await post(`/api/film/${fq()}/beats-apply?job=${j.id}`);
       await loadFilm(); watchJob(s.job, () => loadFilm()); toast("Momenty zapisane (Ctrl+Z cofa)");
+    }
+  });
+};
+
+$("broll").onclick = async () => {
+  if (!S.view.plan.vertical) return toast("B-roll stock jest włączony tylko dla shortów (style/grammar.json › broll)", true);
+  const r = await startJob("broll", `/api/film/${fq()}/broll`);
+  $("log").textContent = "";
+  watchJob(r.job, async (j) => {
+    if (j.status !== "done") return;
+    const m = j.result.summary;
+    if (m.format !== "short") return toast("B-roll stock jest włączony tylko dla shortów (style/grammar.json › broll)");
+    const items = m.items.map((b) => `<li>${b.new ? "<b>nowy</b> " : ""}„${esc(b.said)}” → ${esc(b.query)}${b.author ? ` <span class="muted">(${esc(b.author)})</span>` : ""}</li>`).join("");
+    const skipped = m.skipped.filter((s) => !s.down).map((s) => `<li>„${esc(s.said)}”: ${esc(s.reason)}</li>`).join("");
+    const html = `<h3 id="modaltitle">B-roll</h3><div>Ujęć w filmie: <b>${m.broll}</b> (nowe: ${m.new}).</div>
+      ${m.error ? `<p class="badge warn">${esc(m.error)}. Dobór przerwany: popraw i uruchom jeszcze raz.</p>` : ""}
+      ${items ? `<ul>${items}</ul>` : m.error ? "" : '<p class="muted">Brak miejsc na b-roll: w tekście nie pada nic konkretnego z listy tematów albo miejsca zajmują grafiki i ważne momenty.</p>'}
+      ${skipped ? `<div class="muted">Pominięte:</div><ul class="muted">${skipped}</ul>` : ""}
+      ${m.credits.length ? `<div class="muted">Wklej do opisu filmu (wytyczne API Pexels proszą o link do Pexels i autorów):</div><pre>${esc(m.credits.join("\n"))}</pre>` : ""}
+      <div class="muted">Każde ujęcie możesz potem zaznaczyć na osi (V4) i usunąć. Ctrl+Z cofa.</div>`;
+    if (!m.new) return modal(html, [["OK", false]]);
+    if (await modal(html, [["Zastosuj", true], ["Odrzuć", false, "ghost"]])) {
+      const s = await post(`/api/film/${fq()}/broll-apply?job=${j.id}`);
+      await loadFilm(); watchJob(s.job, () => loadFilm()); toast("B-roll zapisany (Ctrl+Z cofa)");
     }
   });
 };

@@ -44,7 +44,13 @@ kopii `.orig` w testach zgodności: bez `canvas` działają jak wcześniej, kopi
 
 **Koszt cykliczny:** 0 zł.
 
-**Otwarte pytania (do Kamila):** (1) czy `~/video-pipeline` (skrypty + `style/`) ma trafić do gita — dziś historia gramatyki =
-`style/history/` + snapshoty tar; (2) fail-fast w `run_v4.sh` także dla filmów bez `beats` — zostaje?; (3) b-roll w shortach:
-dziś tylko podpowiedź w inspektorze i C10, bez automatu — czy budować wstawianie?; (4) czy whisper zapisuje tysiące jako „1 200”
-(dwa słowa) — `beats.stat_card` obsługuje oba zapisy.
+**Decyzje Kamila (2026-10-21) w miejsce otwartych pytań:**
+1. `~/video-pipeline` jest w gicie (lokalne repo, commit `652914d`; `render/`, modele, `whisper.cpp`, `node_modules`, `.venv` i panel
+   ignorowane). Snapshoty tar zostają jako kopia, nie jedyna historia.
+2. Fail-fast w `run_v4.sh` dla KAŻDEGO filmu (rekomendacja przyjęta: cel to film gotowy do wrzucenia, więc brak pliku > plik ze
+   starego albo nieprzyciętego EDL). Pada też `assemble.py` -> `FAILED assemble <film>`.
+3. B-roll w shortach: automat z darmowych banków wideo — osobna decyzja `docs/adr/0003-broll-stock.md`.
+4. Transkrypcji NIE normalizujemy („1 200” zostaje dwoma słowami): indeksy słów są zaczepami planu (`keeps`, `emph`, `gfx`,
+   `beats`), sklejenie tokenów przesunęłoby każdy indeks w istniejących planach. Cyfry skleja czytający (`beats.stat_card`,
+   critic C9 `num_key`).
+5. `run_v4.sh` kończy się kodem 1, gdy któryś film padł (linia `FAILED_FILMS …` w `render.log`), także przy starcie z terminala.

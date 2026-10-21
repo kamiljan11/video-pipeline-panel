@@ -166,6 +166,36 @@ def beats_steps(work: Path, film: str, llm: bool = False) -> list[Step]:
     return [prepare, Cmd(args, work, timeout=600), collect]
 
 
+BRIDGE = Path.home() / "infisical" / "infisical_bridge.py"  # secrets come only through the Infisical bridge
+BROLL_DIR = RENDER / "broll"  # = broll.CACHE: clips shared by every project
+
+
+def broll_steps(work: Path, film: str) -> list[Step]:
+    """broll.py on the freshly rebuilt EDL (output times); it downloads clips into render/broll/ and writes only the
+    proposal. The Pexels key goes from Infisical straight into broll.py's environment, never through the panel."""
+    src = work / f"plan_{film}.json"
+    out = scratch(work, f"broll_{film}.json")
+
+    def prepare(job: Job) -> None:
+        job.result["base"] = src.read_text(encoding="utf-8")  # /broll-apply refuses if the plan moved on since
+        out.unlink(missing_ok=True)
+
+    def collect(job: Job) -> None:
+        if not out.exists():
+            raise StepFailed("broll.py nie zapisał propozycji (szczegóły w logu)")
+        prop = read_json(out)
+        own = json.loads(job.result["base"]).get("broll")  # any shape (Syncthing): never a TypeError after the downloads
+        had = {b.get("word") for b in own if isinstance(b, dict)} if isinstance(own, list) else set()
+        job.result.update({"proposal": prop, "summary": {
+            "broll": len(prop.get("broll", [])), "new": prop.get("new", 0), "format": prop.get("format"), "error": prop.get("error"),
+            "items": [{"said": b.get("said", ""), "query": b.get("query", ""), "author": b.get("author", ""), "new": b.get("word") not in had}
+                      for b in prop.get("broll", [])],
+            "skipped": prop.get("skipped", []), "credits": prop.get("credits", [])}})
+
+    args = [PY, str(BRIDGE), "run", "--secrets", "Pexels", "--", PY, _s("broll.py"), f"plan_{film}.json", "--json", str(out)]
+    return [*rebuild_steps(work, film), prepare, Cmd(args, work, timeout=900), collect]
+
+
 def plan_diff(before: dict, after: dict) -> list[str]:
     a = json.dumps(before, ensure_ascii=False, indent=1).splitlines()
     b = json.dumps(after, ensure_ascii=False, indent=1).splitlines()
@@ -227,7 +257,7 @@ def render_steps(work: Path, film: str, out_dir: Path) -> list[Step]:
     gfx_begin, gfx_end = unfinished_guard(work, gfx_marker(work), None, "gfx_specs.json")
 
     def finished(job: Job) -> None:
-        # run_v4.sh exits 0 even when assemble.py failed (no set -e, `echo ALL_DONE` last): its own "DONE <film>" is the proof
+        # run_v4.sh exits 1 when a film failed (the step above then fails first); its own "DONE <film>" stays the proof
         if not done_in_log(log, film, start["at"]):
             raise StepFailed("render się nie udał (brak „DONE” w render.log): szczegóły w logu powyżej")
         segs_end(job)

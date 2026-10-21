@@ -112,6 +112,17 @@ class Panel:
             store.atomic_write(sp, "[]")
         return self.save(film, "momenty montażu", p2, s2 if prop.get("specs") else None)
 
+    def apply_broll(self, film: str, job_id: int) -> dict:
+        self.guard()
+        j = self.runner.jobs.get(job_id)
+        if not j or j.kind != "broll" or j.film != film or j.status != "done":
+            raise HTTPException(400, "najpierw „Dobierz b-roll” musi się skończyć")
+        if store.plan_path(self.work, film).read_text(encoding="utf-8") != j.result["base"]:
+            raise HTTPException(409, "plan zmienił się od doboru b-rollu; uruchom dobór jeszcze raz")
+        plan = self.plan(film)
+        p2 = planops.apply_broll(plan, j.result["proposal"], len(store.words_of(self.work, plan)), pipeline.BROLL_DIR)
+        return self.save(film, "b-roll", p2)
+
     # ---- writing ----
     def guard(self) -> None:
         if self.runner.busy_with("render"):
@@ -261,6 +272,8 @@ class Panel:
             i = int(a["i"])
             around = "".join(texts[max(0, i - 6):i + 10]).strip()[:300]  # the sentence around it: beats.py picks a card icon from it
             return self.save(film, f"moment na „{texts[i].strip()}”", planops.add_beat(plan, i, str(a.get("type")), self.beat_types(), around))
+        if op == "remove_broll":
+            return self.save(film, "usuń b-roll", planops.remove_broll(plan, int(a["pos"])))
         if op == "remove_beat":
             return self.save(film, "usuń moment", planops.remove_beat(plan, int(a["pos"])))
         if op == "globals":
@@ -404,6 +417,15 @@ def create_app(panel: Panel) -> FastAPI:
     @app.post("/api/film/{film}/beats-apply")
     def beats_apply(film: str, job: int) -> dict:
         return panel.apply_beats(panel.known(film), job)
+
+    @app.post("/api/film/{film}/broll")
+    def broll(film: str) -> dict:
+        panel.no_foreign_render()  # the job rebuilds the EDL first
+        return submit_once("broll", panel.known(film), lambda: pipeline.broll_steps(panel.work, film))
+
+    @app.post("/api/film/{film}/broll-apply")
+    def broll_apply(film: str, job: int) -> dict:
+        return panel.apply_broll(panel.known(film), job)
 
     @app.post("/api/film/{film}/preview")
     def preview(film: str, t: float) -> dict:

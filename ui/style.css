@@ -1,7 +1,7 @@
 :root {
   --bg: #121417; --panel: #1b1e23; --line: #2c3038; --fg: #e8eaed; --muted: #8b919c; --acc: #2de2c4;
   --static: #4b5563; --zoom: #3b82f6; --drift: #7c3aed; --emph: #f59e0b; --override: #ef4444;
-  --on-light: #0b0d10; --gfx: #10b981; --slide: #ec4899; --music: #64748b; --sfx: #eab308; --err: #ef4444; --warn: #f59e0b; --info: #60a5fa; --beat: #2de2c4;
+  --on-light: #0b0d10; --gfx: #10b981; --slide: #ec4899; --music: #64748b; --sfx: #eab308; --err: #ef4444; --warn: #f59e0b; --info: #60a5fa; --beat: #2de2c4; --broll: #a78bfa;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 14px/1.4 "Inter", "Noto Sans", system-ui, sans-serif; }
@@ -14,7 +14,7 @@ textarea { width: 100%; min-height: 60px; resize: vertical; }
 .muted { color: var(--muted); }
 .badge { padding: 2px 8px; border-radius: 4px; background: #2a2f37; white-space: nowrap; }
 .badge.warn { background: #b45309; color: #fff; }
-#inspector p.badge { white-space: normal; display: block; padding: 6px 8px; margin: 6px 0; line-height: 1.35; }
+p.badge { white-space: normal; display: block; padding: 6px 8px; margin: 6px 0; line-height: 1.35; }
 #top { display: flex; gap: 8px; align-items: center; padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 #top .logo { color: var(--acc); margin-right: 6px; }
 #top .sep { width: 1px; height: 22px; background: var(--line); }
@@ -37,6 +37,7 @@ main { display: flex; height: calc(100% - 50px); }
 .vis-item.k-override { box-shadow: inset 0 -4px 0 var(--override); }
 .vis-item.g-gfx { background: var(--gfx); border-color: var(--gfx); color: var(--on-light); }
 .vis-item.g-slide { background: var(--slide); border-color: var(--slide); color: var(--on-light); }
+.vis-item.g-broll { background: var(--broll); border-color: var(--broll); color: var(--on-light); }
 .vis-item.g-music { background: var(--music); border-color: var(--music); }
 .vis-item.g-sfx { background: var(--sfx); border-color: var(--sfx); color: var(--on-light); }
 .vis-item.c-error { background: var(--err); border-color: var(--err); color: var(--on-light); }
@@ -112,3 +113,4 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .sw.b-punch { background: var(--beat); } .sw.b-none { background: transparent; border: 2px solid var(--beat); }
 .sw.b-force { border: 2px dashed var(--warn); } .sw.b-unknown { border-color: var(--err); }
 #legend .b-off { color: var(--muted); text-decoration: line-through; }
+#inspector .grid > div { min-width: 0; overflow-wrap: anywhere; }  /* long source URLs of b-roll */

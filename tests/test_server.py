@@ -220,6 +220,39 @@ class ServerTest(unittest.TestCase):
         self.assertIn("poza katalogiem projektu", str(r))
         self.assertFalse((self.work.parent / "poza.json").exists())
 
+    def test_broll_job_apply_and_remove_through_history(self):
+        from montazownia import pipeline
+        from montazownia.jobs import Cmd, Job
+        st, r = self.call("/api/film/a/broll", {})
+        self.assertEqual((st, self.kinds()[-1]), (200, ("broll", "a")))
+        cmd = next(s for s in self.panel.runner.jobs[r["job"]].steps if isinstance(s, Cmd) and "broll.py" in " ".join(s.argv))
+        self.assertEqual(cmd.argv[1:6], [str(pipeline.BRIDGE), "run", "--secrets", "Pexels", "--"])  # key only via Infisical
+        base = (self.work / "plan_a.json").read_text()
+        clip = str(pipeline.BROLL_DIR / "pexels_42_1080x1920.mp4")
+        item = {"word": 4, "dur": 2.5, "lead": 0.0, "query": "q", "said": "x", "file": clip, "provider": "pexels", "id": 42,
+                "author": "A", "url": "https://www.pexels.com/video/42/", "clip_dur": 9.0}
+        bad = [{**item, "file": "/etc/passwd"}, {**item, "file": str(pipeline.BROLL_DIR / ".." / "pexels_1_1x1.mp4")},
+               {**item, "word": 10**6}, {**item, "dur": 30}, {**item, "id": True}, "x", [item, {**item, "id": 43}]]
+        for k, b in enumerate(bad):
+            with self.subTest(bad=b):
+                prop = {"broll": b if isinstance(b, list) else [b]}  # the last one: two clips on one word
+                self.panel.runner.jobs[800 + k] = Job(800 + k, "broll", "a", [], status="done", result={"base": base, "proposal": prop})
+                self.assertEqual(self.call(f"/api/film/a/broll-apply?job={800 + k}", {})[0], 400)
+        self.assertNotIn("broll", json.loads((self.work / "plan_a.json").read_text()))
+        self.panel.runner.jobs[900] = Job(900, "broll", "a", [], status="done", result={"base": base, "proposal": {"broll": [item]}})
+        self.panel.runner.jobs[901] = Job(901, "beats", "a", [], status="done", result={"base": base, "proposal": {"broll": [item]}})
+        self.assertEqual(self.call("/api/film/a/broll-apply?job=901", {})[0], 400)  # not a b-roll job
+        st, r = self.call("/api/film/a/broll-apply?job=900", {})
+        self.assertEqual(st, 200, r)
+        self.assertEqual(json.loads((self.work / "plan_a.json").read_text())["broll"], [item])
+        self.assertEqual(self.call("/api/film/a/edit", {"op": "remove_broll", "pos": 0})[0], 200)
+        plan = json.loads((self.work / "plan_a.json").read_text())
+        self.assertEqual((plan["broll"], plan["broll_rejected"]), ([], [{"word": 4, "provider": "pexels", "id": 42}]))
+        self.assertEqual(self.call("/api/film/a/edit", {"op": "remove_broll", "pos": 0})[0], 400)
+        self.call("/api/undo?film=a", {})
+        self.assertEqual(len(json.loads((self.work / "plan_a.json").read_text())["broll"]), 1)
+        self.assertEqual(self.call("/api/film/a/broll-apply?job=900", {})[0], 409)  # plan moved on since the job
+
     def test_add_and_remove_beat_ops(self):
         st, r = self.call("/api/film/a/edit", {"op": "add_beat", "i": 3, "type": "maxim"})
         self.assertEqual(st, 200, r)

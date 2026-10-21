@@ -16,7 +16,7 @@ Jedna nazwa na pojęcie. Pierwsza kolumna = UI i dokumentacja (PL), druga = kod 
 | bezpieczny limit | `zmax` | największy zoom, przy którym głowa zostaje w kadrze (liczy `face_track.py`); panel i pipeline nie pozwalają wyżej |
 | grafika | overlay, `gfx`, `gfx_specs.json` | plansza HTML wyrenderowana do `.mov` (`gfx/render.mjs`); `kw`, `list`, `lower`, `chap`, `cta`, `slide`, `end` |
 | przesunięcie grafiki | `lead` | sekundy od słowa-zaczepu do startu grafiki |
-| krytyk | `critic.py`, C1–C9 | reguły jakości (C1 brak wydarzenia wizualnego, C3 short bez zmiany obrazu, C6 ekran końcowy, C9 liczby bez źródła…) |
+| krytyk | `critic.py`, C1–C11 | reguły jakości (C1 brak wydarzenia wizualnego, C3 short bez zmiany obrazu, C6 ekran końcowy, C9 liczby bez źródła, C10 gramatyka montażu, C11 b-roll z planu, którego nie dało się ułożyć…) |
 | akceptuję | `critic_accept` | świadomy wyjątek od uwagi krytyka, z powodem |
 | poprawki automatyczne | `critic.py --fix` | krytyk sam dopisuje najazdy / ogon; w panelu najpierw diff |
 | zweryfikowane liczby | `verified_claims` | id grafik, których liczby mają potwierdzone źródło (C9 ich nie zgłasza) |
@@ -36,6 +36,10 @@ Jedna nazwa na pojęcie. Pierwsza kolumna = UI i dokumentacja (PL), druga = kod 
 | wymuszony | `force` | moment zawsze dostaje najazd (ustawia montażysta albo `critic.py --fix` przy C1) |
 | Zwrot (etykieta) | typ `contrast` | etykieta w UI to `label` z gramatyki; kod typu się nie zmienia (`contrast` = „Zwrot”, `stat` = „Liczba”…) |
 | rytm | `pace` | najazd bez momentu, tylko bo kadr stał dłużej niż `max_static` (oznaczony osobno; lepiej skrócić niż dokładać) |
+| b-roll (przebitka) | `broll` (plan i EDL), `broll.py`, `stock.py` | pełnokadrowe ujęcie stock (Pexels) na słowie-zaczepie z listy tematów; głos leci dalej, napisy i grafiki są nad nim; tylko shorty (ADR-0003) |
+| podpowiedź b-rollu | `effects.<format>.<typ>.broll`, `beat_fx[].broll` | INNE pojęcie niż klip: rodzaj przebitki, jaki gramatyka sugeruje dla typu momentu (`icons`, `screen`…); tylko tekst w inspektorze momentu, nic nie wstawia |
+| odrzucony b-roll | `broll_rejected` | klip usunięty w panelu; ani on, ani jego słowo nie wracają przy kolejnym doborze |
+| lista tematów | `broll.topics` w `style/grammar.json` | pary [regex na jednym słowie, angielskie hasło do stocku]; nowy temat = nowa para, bez kodu |
 | karta pionowa | `canvas: "v"` | grafika shortu w górnym pasie kadru 9:16 (np. karta liczby z momentu „liczba”) |
 
 ## Jak dodać nowy typ momentu

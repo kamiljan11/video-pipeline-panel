@@ -11,6 +11,7 @@ import copy
 import re
 import unicodedata
 from collections.abc import Callable, Iterable
+from pathlib import Path
 from typing import Any
 
 Plan = dict[str, Any]
@@ -359,6 +360,60 @@ def remove_beat(plan: Plan, pos: int) -> Plan:
     p = copy.deepcopy(plan)
     _at(p.get("beats", []), pos, "moment")
     del p["beats"][pos]
+    return p
+
+
+# ---- stock b-roll (../broll.py): plan["broll"], placed again by ../build_edl.py from the anchor word ----
+MAX_BROLL = 200
+BROLL_FILE = re.compile(r"[a-z]+_\d+_\d+x\d+\.mp4")  # = stock.cache_name
+
+
+def _broll(b: Any, n_words: int, cache: Path) -> dict:
+    if not isinstance(b, dict):
+        raise EditError("zły wpis b-rollu")
+    w = b.get("word")
+    if not isinstance(w, int) or isinstance(w, bool) or not 0 <= w < n_words:
+        raise EditError("b-roll: słowo poza transkrypcją")
+    f = _str(b.get("file"), "plik b-rollu", 500)
+    if Path(f).parent != cache or not BROLL_FILE.fullmatch(Path(f).name):  # build_edl.py checks it again (realpath)
+        raise EditError("b-roll: plik spoza render/broll")
+    out = {"word": w, "dur": _bounded(b.get("dur", 2.5), 0.5, 8.0, "długość b-rollu (s)"),
+           "lead": _bounded(b.get("lead", 0.0), -1.0, 3.0, "przesunięcie b-rollu (s)"), "file": f}
+    if "clip_dur" in b:
+        out["clip_dur"] = _bounded(b["clip_dur"], 0, 3600, "długość klipu (s)")
+    for k in ("query", "said", "provider", "author", "url"):
+        if k in b:
+            out[k] = _str(b[k], k)
+    if "id" in b:
+        if not isinstance(b["id"], int) or isinstance(b["id"], bool):
+            raise EditError("b-roll: id klipu")
+        out["id"] = b["id"]
+    return out
+
+
+def apply_broll(plan: Plan, proposal: Any, n_words: int, cache: Path) -> Plan:
+    """Take a broll.py proposal (the plan's own b-roll plus the new clips); every item is checked again here."""
+    if not isinstance(proposal, dict) or not isinstance(proposal.get("broll"), list) or len(proposal["broll"]) > MAX_BROLL:
+        raise EditError("zła propozycja b-rollu")
+    p = copy.deepcopy(plan)
+    p["broll"] = sorted((_broll(b, n_words, cache) for b in proposal["broll"]), key=lambda b: b["word"])
+    words = [b["word"] for b in p["broll"]]
+    if len(set(words)) != len(words):  # the timeline and removal find a clip by its word
+        raise EditError("b-roll: dwa klipy na jednym słowie")
+    return p
+
+
+def remove_broll(plan: Plan, pos: int) -> Plan:
+    """The removed clip and its word are remembered (plan["broll_rejected"]): broll.py does not propose them again."""
+    p = copy.deepcopy(plan)
+    got = p.get("broll")
+    items: list = got if isinstance(got, list) else []
+    b = _at(items, pos, "b-roll")
+    if not isinstance(b, dict):
+        raise EditError(f"b-roll {pos}: zły wpis w planie")
+    del items[pos]
+    old = p.get("broll_rejected")
+    p["broll_rejected"] = [*(old if isinstance(old, list) else []), {k: b[k] for k in ("word", "provider", "id") if k in b}][-MAX_BROLL:]
     return p
 
 

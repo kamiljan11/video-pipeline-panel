@@ -52,6 +52,20 @@ def overlays_view(edl: dict, specs: dict[str, dict]) -> list[dict]:
     return res
 
 
+def broll_view(edl: dict, plan: dict) -> list[dict]:
+    """Stock b-roll where build_edl.py placed it; pos = index in plan["broll"] (for removal), credits per clip."""
+    got = plan.get("broll")
+    own: list = got if isinstance(got, list) else []  # plans arrive via Syncthing: any shape
+    pos = {b.get("word"): k for k, b in enumerate(own) if isinstance(b, dict)}
+    items = {b.get("word"): b for b in own if isinstance(b, dict)}
+    res = []
+    for b in edl.get("broll", []):
+        it = items.get(b["word"], {})
+        res.append({"pos": pos.get(b["word"]), "word": b["word"], "start": b["at"], "end": round(b["at"] + b["dur"], 3),
+                    "query": b.get("query", ""), "said": it.get("said", ""), "author": it.get("author", ""), "url": it.get("url", "")})
+    return res
+
+
 def sfx_events(edl: dict, specs: dict[str, dict]) -> list[dict]:
     """Where music/make_beds.py puts sound effects (display only)."""
     ev = []
@@ -167,6 +181,7 @@ def build(plan: dict, words: list[dict], specs_list: list[dict], edl: dict | Non
         "ready": True, "body": round(body, 3), "total": round(total, 3), "vertical": bool(edl.get("vertical")),
         "w": edl.get("w"), "h": edl.get("h"),
         "segments": segments_view(edl, plan), "overlays": overlays_view(edl, specs), "sfx": sfx_events(edl, specs),
+        "broll": broll_view(edl, plan), "broll_skipped": edl.get("broll_skipped", []),
         "music": {"seed": edl.get("music_seed", 7), "db": edl.get("music_db", -13), "sfx_db": edl.get("sfx_db", -12),
                   "file": edl.get("music")},
         "issues": marks, "words": words_view(plan, words, edl), "beats": beats_view(plan, words, edl, grammar),
