@@ -393,6 +393,10 @@ class PreviewAndTimelineTest(unittest.TestCase):
         two = {"broll": [{"word": 20, "said": "first"}, {"word": 20, "said": "second"}]}  # place() keeps the first
         first = timeline.broll_view(EDL, two)[0]
         self.assertEqual((first["pos"], first["said"]), (0, "first"))
+        # the first entry has no cached file, so place() skipped it and laid out the second: point at that one
+        gone = {"broll": [{"word": 20, "said": "gone", "file": "/c/gone.mp4"}, {"word": 20, "said": "placed", "file": "/c/a.mp4"}]}
+        hit = timeline.broll_view(EDL, gone)[0]
+        self.assertEqual((hit["pos"], hit["said"]), (1, "placed"))
 
 
 if __name__ == "__main__":

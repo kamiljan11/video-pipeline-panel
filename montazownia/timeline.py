@@ -5,6 +5,7 @@ transcript and gfx_specs. Nothing here decides the edit; it only places what the
 """
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
 
@@ -56,15 +57,19 @@ def broll_view(edl: dict, plan: dict) -> list[dict]:
     """Stock b-roll where build_edl.py placed it; pos = index in plan["broll"] (for removal), credits per clip."""
     got = plan.get("broll")
     own: list = got if isinstance(got, list) else []  # plans arrive via Syncthing: any shape
-    pos: dict[int, int] = {}
-    for k, b in enumerate(own):  # the first entry of a word wins, as in broll.place (later ones collide and are dropped)
+    pos: dict[tuple, int] = {}  # (word, real file) -> first such entry; (word, None) -> first entry of the word
+    for k, b in enumerate(own):
         if isinstance(b, dict) and type(b.get("word")) is int:
-            pos.setdefault(b["word"], k)
-    items = {w: own[k] for w, k in pos.items()}
+            real = os.path.realpath(b["file"]) if isinstance(b.get("file"), str) else None
+            pos.setdefault((b["word"], real), k)
+            pos.setdefault((b["word"], None), k)
     res = []
     for b in edl.get("broll", []):
-        it = items.get(b["word"], {})
-        res.append({"pos": pos.get(b["word"]), "word": b["word"], "start": b["at"], "end": round(b["at"] + b["dur"], 3),
+        # place() lays out the first PLACEABLE entry of a word (EDL file = its real path): match it, not just the word
+        f = b.get("file") if isinstance(b.get("file"), str) else None
+        k = pos.get((b["word"], f), pos.get((b["word"], None))) if f else pos.get((b["word"], None))
+        it = own[k] if k is not None else {}
+        res.append({"pos": k, "word": b["word"], "start": b["at"], "end": round(b["at"] + b["dur"], 3),
                     "query": b.get("query", ""), "said": it.get("said", ""), "author": it.get("author", ""), "url": it.get("url", "")})
     return res
 
