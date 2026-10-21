@@ -131,6 +131,41 @@ def fix_preview_steps(work: Path, film: str) -> list[Step]:
             Cmd([PY, _s("critic.py"), str(copy), "--fix", "--json", str(report)], work, (0, 1)), collect]
 
 
+GRAMMAR = PIPELINE / "style" / "grammar.json"
+
+
+def grammar() -> dict:
+    """The editing grammar (moment types, labels, effects per format); data the editor may change, read on every use.
+    Only the shape the panel reads is checked here (beats.<type> objects); the full check is beatfx.load_grammar."""
+    g = read_json(GRAMMAR)
+    beats = g.get("beats") if isinstance(g, dict) else None
+    if not isinstance(beats, dict) or not all(isinstance(b, dict) for b in beats.values()):
+        raise ValueError(f"{GRAMMAR}: beats must map each moment type to an object")
+    return g
+
+
+def beats_steps(work: Path, film: str, llm: bool = False) -> list[Step]:
+    """beats.py on the plan as it is now; it writes nothing but the proposal. /beats-apply saves it through the history."""
+    src = work / f"plan_{film}.json"
+    out = scratch(work, f"beats_{film}.json")
+
+    def prepare(job: Job) -> None:
+        job.result["base"] = src.read_text(encoding="utf-8")  # /beats-apply refuses if the plan moved on since
+        out.unlink(missing_ok=True)
+
+    def collect(job: Job) -> None:
+        if not out.exists():
+            raise StepFailed("beats.py nie zapisał propozycji (szczegóły w logu)")
+        prop = read_json(out)
+        old = {(b["word"], b["type"]) for b in json.loads(job.result["base"]).get("beats", [])}
+        job.result.update({"proposal": prop, "summary": {
+            "beats": len(prop.get("beats", [])), "new": sum((b["word"], b["type"]) not in old for b in prop.get("beats", [])),
+            "gfx": [f"{sp.get('text')} {sp.get('sub', '')}".strip() for sp in prop.get("specs", [])]}})
+
+    args = [PY, _s("beats.py"), f"plan_{film}.json", "--gfx", "--json", str(out), *(["--llm"] if llm else [])]
+    return [prepare, Cmd(args, work, timeout=600), collect]
+
+
 def plan_diff(before: dict, after: dict) -> list[str]:
     a = json.dumps(before, ensure_ascii=False, indent=1).splitlines()
     b = json.dumps(after, ensure_ascii=False, indent=1).splitlines()

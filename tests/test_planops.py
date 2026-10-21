@@ -146,5 +146,50 @@ class SpecSchemaTest(unittest.TestCase):
         self.assertNotIn("text", po.update_spec([{"id": "b", "type": "end", "dur": 4}], "b", {"sub": "x"})[0])
 
 
+class BeatsTest(unittest.TestCase):
+    TYPES = ("hook", "stat", "contrast", "maxim")
+
+    def test_apply_proposal_drops_auto_emph_and_adds_only_new_graphics(self):
+        p = plan([[0, 9]], emph=[{"word": 3, "amt": 0.1, "auto": True}, {"word": 5, "amt": 0.2}])
+        specs = [{"id": "old", "type": "kw", "text": "x", "dur": 2}]
+        prop = {"beats": [{"type": "stat", "word": 4, "src": "rule", "text": "40 repo"}],
+                "gfx": [{"id": "b_new", "word": 4, "lead": 0.0}, {"id": "old", "word": 1}],
+                "specs": [{"id": "b_new", "type": "kw", "text": "40", "dur": 2.5, "canvas": "v", "quote": True},
+                          {"id": "old", "type": "kw", "text": "changed", "dur": 2}]}
+        p2, s2 = po.apply_beats(p, specs, prop, self.TYPES, 10)
+        self.assertEqual(p2["beats"], [{"type": "stat", "word": 4, "src": "rule", "text": "40 repo"}])
+        self.assertEqual(p2["emph"], [{"word": 5, "amt": 0.2}])
+        self.assertEqual([g["id"] for g in p2["gfx"]], ["b_new"])
+        self.assertEqual([s["text"] for s in s2], ["x", "40"])  # an existing id is never overwritten
+        self.assertNotIn("beats", p)  # input untouched
+
+    def test_apply_rejects_bad_proposals(self):
+        p = plan([[0, 9]])
+        for prop in ({"beats": [{"type": "nope", "word": 1}]}, {"beats": [{"type": "stat", "word": 99}]},
+                     {"beats": [], "specs": [{"id": "a/b", "type": "kw", "dur": 2}]},
+                     {"beats": [], "specs": [{"id": "c", "type": "kw", "dur": 2, "canvas": "h"}]}, {"beats": "x"}):
+            with self.subTest(prop=prop), self.assertRaises(EditError):
+                po.apply_beats(p, [], prop, self.TYPES, 10)
+
+    def test_set_beat_type_makes_it_manual_off_and_force_exclusive(self):
+        p = plan([[0, 9]], beats=[{"type": "stat", "word": 4, "src": "rule"}])
+        p2 = po.set_beat(p, 0, {"type": "maxim", "off": True}, self.TYPES)
+        self.assertEqual(p2["beats"][0], {"type": "maxim", "word": 4, "src": "manual", "off": True})
+        self.assertNotIn("off", po.set_beat(p2, 0, {"off": False}, self.TYPES)["beats"][0])
+        with self.assertRaises(EditError):
+            po.set_beat(p2, 0, {"force": True}, self.TYPES)
+        with self.assertRaises(EditError):
+            po.set_beat(p, 0, {"amt": 1}, self.TYPES)
+
+    def test_add_and_remove_manual_beat(self):
+        p = plan([[0, 5]], beats=[{"type": "stat", "word": 4, "src": "rule"}])
+        p2 = po.add_beat(p, 2, "contrast", self.TYPES)
+        self.assertEqual([(b["word"], b["src"]) for b in p2["beats"]], [(2, "manual"), (4, "rule")])
+        for i in (4, 8):  # already a moment / cut word
+            with self.subTest(i=i), self.assertRaises(EditError):
+                po.add_beat(p, i, "contrast", self.TYPES)
+        self.assertEqual(len(po.remove_beat(p2, 0)["beats"]), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

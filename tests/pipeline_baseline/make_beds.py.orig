@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+"""make_beds.py edl.json outdir -> outdir/music.wav (own generated bed), outdir/sfx.wav (synth SFX timed to graphics/zooms)
+Adds edl["music"], edl["sfx"] in place."""
+import sys, json, os, subprocess, wave, numpy as np
+SR = 44100
+edl_p, od = sys.argv[1], sys.argv[2]; os.makedirs(od, exist_ok=True)
+edl = json.load(open(edl_p))
+segs = edl["segments"]; body = sum(s["out"] - s["in"] for s in segs); total = body + edl.get("tail", 0)
+specs = {s["id"]: s for s in json.load(open(edl["gfx_specs"]))} if edl.get("gfx_specs") else {}
+rng = np.random.default_rng(3)
+
+def lp(x, fc):
+    X = np.fft.rfft(x); f = np.fft.rfftfreq(len(x), 1 / SR)
+    return np.fft.irfft(X / (1 + (f / fc) ** 4), len(x))
+def bp(x, lo, hi):
+    return lp(x, hi) - lp(x, lo)
+
+def whoosh(d=0.7, up=True):
+    n = int(d * SR); t = np.arange(n) / SR
+    noise = rng.standard_normal(n)
+    # sweep: blend of bands, crossfaded over time
+    a = bp(noise, 300, 1200); b = bp(noise, 1500, 6000)
+    k = t / d if up else 1 - t / d
+    sig = a * (1 - k) + b * k
+    env = np.sin(np.pi * np.clip(t / d, 0, 1)) ** 2
+    return sig * env * 0.5
+def pop():
+    n = int(0.12 * SR); t = np.arange(n) / SR
+    f = 520 + 600 * np.exp(-t * 40)
+    s = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t * 32) * 0.55
+    click = rng.standard_normal(n) * np.exp(-t * 900) * 0.15
+    return s + click
+def ding():
+    n = int(1.2 * SR); t = np.arange(n) / SR
+    s = sum(np.sin(2 * np.pi * f * t) * a for f, a in ((1318.5, .5), (1975.5, .25), (2637, .12))) * np.exp(-t * 4) * 0.4
+    return s
+
+sfx = np.zeros(int(total * SR) + SR * 2)
+def put(t, sig, g=1.0):
+    s = max(0, int(t * SR)); e = min(len(sfx), s + len(sig)); sfx[s:e] += sig[:e - s] * g
+
+for o in edl.get("overlays", []):
+    sp = specs.get(o["id"], {}); ty = sp.get("type")
+    if ty in ("kw", "lower"): put(o["at"] + 0.03, pop(), 0.8)
+    if ty == "list":
+        put(o["at"], whoosh(0.5), 0.5)
+        for dl in sp.get("delays", []): put(o["at"] + dl + 0.05, pop(), 0.7)
+    if ty in ("chap", "slide"): put(o["at"] - 0.3, whoosh(0.8), 0.9)
+    if ty == "end": put(o["at"] - 0.3, whoosh(0.9, False), 0.8)
+    if ty == "cta": put(o["at"] + 0.1, ding(), 0.6)
+acc = 0.0
+for s in segs:
+    z = s.get("zoom")
+    if isinstance(z, dict) and z["t0"] > 0.01 and z["b"] > z["a"] + 0.1:  # emphasis punch-in
+        put(acc + z["t0"] - 0.05, whoosh(0.35), 0.35)
+    acc += s["out"] - s["in"]
+
+sfx /= max(1e-9, np.abs(sfx).max()) / 0.8
+d16 = (np.stack([sfx, sfx], 1) * 32767).astype(np.int16)
+with wave.open(os.path.join(od, "sfx.wav"), "wb") as w:
+    w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR); w.writeframes(d16.tobytes())
+subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__), "gen_music.py"), os.path.join(od, "music.wav"), f"{total + 1:.2f}",
+                str(edl.get("music_seed", 7))], check=True)
+edl["music"] = os.path.join(od, "music.wav"); edl["sfx"] = os.path.join(od, "sfx.wav")
+json.dump(edl, open(edl_p, "w"), indent=1, ensure_ascii=False)
+print("beds ok", round(total, 1))

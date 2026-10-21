@@ -58,5 +58,20 @@ class TimelineTest(unittest.TestCase):
         self.assertFalse(timeline.build({"keeps": []}, [], [], None, None)["ready"])
 
 
+class BeatsViewTest(unittest.TestCase):
+    def test_beats_with_effect_and_pace_and_silent_punches(self):
+        edl = {**EDL, "beat_fx": [{"type": "stat", "word": 1, "at": 5.0, "fx": "punch", "gfx": "kw", "sfx": "ding"},
+                                  {"type": "pace", "word": 0, "at": 1.0, "fx": "punch", "gfx": None, "sfx": None}]}
+        plan = {"keeps": [[0, 1]], "beats": [{"type": "stat", "word": 1, "src": "rule"}, {"type": "maxim", "word": 0, "src": "manual", "off": True}]}
+        words = [word("raz", 11000), word("40", 21000)]
+        rows = timeline.beats_view(plan, words, edl, {"beats": {"stat": {"label": "Liczba"}}})
+        self.assertEqual([(r["type"], r["label"], r["at"], r["fx"]) for r in rows],
+                         [("maxim", "maxim", 1.0, None), ("pace", "rytm", 1.0, "punch"), ("stat", "Liczba", 5.0, "punch")])
+        self.assertTrue(rows[0]["off"])
+        ev = timeline.sfx_events(edl, SPECS)
+        self.assertNotIn({"t": 4.95, "kind": "whoosh"}, ev)  # with beat_fx the punch whoosh is gone
+        self.assertIn({"t": 5.0, "kind": "ding"}, ev)
+
+
 if __name__ == "__main__":
     unittest.main()

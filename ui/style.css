@@ -1,7 +1,7 @@
 :root {
   --bg: #121417; --panel: #1b1e23; --line: #2c3038; --fg: #e8eaed; --muted: #8b919c; --acc: #2de2c4;
   --static: #4b5563; --zoom: #3b82f6; --drift: #7c3aed; --emph: #f59e0b; --override: #ef4444;
-  --on-light: #0b0d10; --gfx: #10b981; --slide: #ec4899; --music: #64748b; --sfx: #eab308; --err: #ef4444; --warn: #f59e0b; --info: #60a5fa;
+  --on-light: #0b0d10; --gfx: #10b981; --slide: #ec4899; --music: #64748b; --sfx: #eab308; --err: #ef4444; --warn: #f59e0b; --info: #60a5fa; --beat: #2de2c4;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 14px/1.4 "Inter", "Noto Sans", system-ui, sans-serif; }
@@ -99,3 +99,16 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .modal .add { color: #6ee7b7; } .modal .del { color: #fca5a5; }
 #toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: #2a2f37; padding: 8px 16px; border-radius: 8px; display: none; z-index: 60; max-width: 80vw; }
 #toast.on { display: block; } #toast.err { background: #7f1d1d; }
+
+/* moments (editing grammar): filled = got its effect, outline = recognised but no effect (reason in the tooltip) */
+.vis-item.vis-point[class*=" b-"] .vis-dot { border-color: var(--beat); }
+.vis-item[class*=" b-"] { color: var(--fg); font-size: 11px; }
+.vis-item.b-punch .vis-dot, .vis-item.b-box .vis-dot, .vis-item.b-gfx .vis-dot { background: var(--beat); }
+.vis-item.b-none .vis-dot, .vis-item.b-spacing .vis-dot, .vis-item.b-quiet .vis-dot, .vis-item.b-manual .vis-dot,
+.vis-item.b-off .vis-dot, .vis-item.b-cut .vis-dot { background: transparent; }
+.vis-item.vis-point.b-unknown .vis-dot { background: transparent; border-color: var(--err); }  /* beats the [class*=" b-"] rule */
+.vis-item.b-off, .vis-item.b-cut { color: var(--muted); text-decoration: line-through; }
+.vis-item.vis-point.b-force .vis-dot { border-color: var(--warn); border-style: dashed; }  /* shape too, not colour only */
+.sw.b-punch { background: var(--beat); } .sw.b-none { background: transparent; border: 2px solid var(--beat); }
+.sw.b-force { border: 2px dashed var(--warn); } .sw.b-unknown { border-color: var(--err); }
+#legend .b-off { color: var(--muted); text-decoration: line-through; }

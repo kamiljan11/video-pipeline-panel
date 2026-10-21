@@ -170,6 +170,77 @@ class ServerTest(unittest.TestCase):
         st, r = self.call("/api/film/a/fix-apply?job=500", {})
         self.assertEqual(st, 409, r)
 
+    def test_beats_job_and_apply_through_history(self):
+        from montazownia.jobs import Job
+        st, r = self.call("/api/film/a/beats", {})
+        self.assertEqual((st, self.kinds()[-1]), (200, ("beats", "a")))
+        base = (self.work / "plan_a.json").read_text()
+        prop = {"beats": [{"type": "stat", "word": 4, "src": "rule"}], "gfx": [{"id": "b_a_4", "word": 4, "lead": 0}],
+                "specs": [{"id": "b_a_4", "type": "kw", "text": "40", "dur": 2.5, "icon": "hash", "quote": True}]}
+        self.panel.runner.jobs[600] = Job(600, "beats", "a", [], status="done", result={"base": base, "proposal": prop})
+        self.panel.runner.jobs[601] = Job(601, "beats", "b", [], status="done", result={"base": base, "proposal": prop})
+        self.assertEqual(self.call("/api/film/a/beats-apply?job=601", {})[0], 400)  # another film's proposal
+        st, r = self.call("/api/film/a/beats-apply?job=600", {})
+        self.assertEqual(st, 200, r)
+        plan = json.loads((self.work / "plan_a.json").read_text())
+        self.assertEqual((plan["beats"][0]["word"], plan["gfx"][-1]["id"]), (4, "b_a_4"))
+        self.assertIn("b_a_4", {s["id"] for s in json.loads((self.work / "gfx_specs.json").read_text())})
+        st, r = self.call("/api/film/a/edit", {"op": "set_beat", "pos": 0, "fields": {"type": "maxim"}})
+        self.assertEqual(st, 200, r)
+        self.assertEqual(self.call("/api/film/a/edit", {"op": "set_beat", "pos": 0, "fields": {"type": "zzz"}})[0], 400)
+        self.call("/api/undo?film=a", {})
+        self.call("/api/undo?film=a", {})
+        self.assertNotIn("beats", json.loads((self.work / "plan_a.json").read_text()))
+        self.assertEqual(self.call("/api/film/a/beats-apply?job=600", {})[0], 200)  # base matches again after undo
+        self.call("/api/film/a/edit", {"op": "toggle_word", "i": 2})
+        self.assertEqual(self.call("/api/film/a/beats-apply?job=600", {})[0], 409)
+        view = self.call("/api/film/a")[1]
+        self.assertIn("stat", view["beat_types"])
+
+    def test_first_card_in_a_project_without_specs_file(self):
+        from montazownia.jobs import Job
+        plan = json.loads((self.work / "plan_a.json").read_text())
+        plan = {k: v for k, v in plan.items() if k not in ("gfx_specs", "gfx_dir", "gfx")}
+        (self.work / "plan_a.json").write_text(json.dumps(plan))
+        (self.work / "gfx_specs.json").unlink(missing_ok=True)
+        prop = {"beats": [{"type": "stat", "word": 4, "src": "rule"}], "gfx": [{"id": "b_a_4", "word": 4, "lead": 0}],
+                "specs": [{"id": "b_a_4", "type": "kw", "text": "40", "dur": 2.5, "icon": "hash", "quote": True}]}
+        base = (self.work / "plan_a.json").read_text()
+        self.panel.runner.jobs[700] = Job(700, "beats", "a", [], status="done", result={"base": base, "proposal": prop})
+        st, r = self.call("/api/film/a/beats-apply?job=700", {})
+        self.assertEqual(st, 200, r)
+        self.assertEqual([sp["id"] for sp in json.loads((self.work / "gfx_specs.json").read_text())], ["b_a_4"])
+        self.assertEqual(json.loads((self.work / "plan_a.json").read_text())["gfx_specs"], "gfx_specs.json")
+        plan["gfx_specs"] = "../poza.json"  # plans arrive via Syncthing: no file is created outside the project
+        (self.work / "plan_a.json").write_text(json.dumps(plan))
+        base = (self.work / "plan_a.json").read_text()
+        self.panel.runner.jobs[701] = Job(701, "beats", "a", [], status="done", result={"base": base, "proposal": prop})
+        st, r = self.call("/api/film/a/beats-apply?job=701", {})
+        self.assertEqual(st, 400, r)
+        self.assertIn("poza katalogiem projektu", str(r))
+        self.assertFalse((self.work.parent / "poza.json").exists())
+
+    def test_add_and_remove_beat_ops(self):
+        st, r = self.call("/api/film/a/edit", {"op": "add_beat", "i": 3, "type": "maxim"})
+        self.assertEqual(st, 200, r)
+        plan = json.loads((self.work / "plan_a.json").read_text())
+        self.assertEqual([(b["word"], b["type"], b["src"]) for b in plan["beats"]], [(3, "maxim", "manual")])
+        self.assertTrue(plan["beats"][0]["text"].strip())  # the sentence around the word (card icon), not ""
+        self.assertEqual(self.call("/api/film/a/edit", {"op": "add_beat", "i": 3, "type": "zzz"})[0], 400)
+        self.assertEqual(self.call("/api/film/a/edit", {"op": "remove_beat", "pos": 0})[0], 200)
+        self.assertEqual(json.loads((self.work / "plan_a.json").read_text())["beats"], [])
+        self.assertEqual(self.call("/api/film/a/edit", {"op": "remove_beat", "pos": 0})[0], 400)
+
+    def test_wrong_shape_grammar_degrades_the_view(self):
+        from unittest import mock
+
+        from montazownia import pipeline
+        bad = self.work / "grammar_bad.json"
+        bad.write_text(json.dumps({"beats": {"stat": "Liczba"}}))  # valid JSON, wrong shape (hand edit)
+        with mock.patch.object(pipeline, "GRAMMAR", bad):
+            st, view = self.call("/api/film/a")
+        self.assertEqual((st, view["beat_types"]), (200, {}))
+
     def test_edits_wait_for_a_render_started_outside_the_panel(self):
         with mock.patch.object(server.pipeline, "foreign_render", return_value=[4242]):
             self.assertEqual(self.call("/api/film/a/edit", {"op": "toggle_word", "i": 4})[0], 409)

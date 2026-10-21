@@ -24,13 +24,14 @@ ln -s ~/video-pipeline/panel/bin/montazownia ~/.local/bin/montazownia
 
 | Element | Działanie |
 |---|---|
-| Oś | V1 ujęcia (kolor = zoom: statyczny / na cięciu / drift / najazd / ręczny), V2 grafiki, V3 slajdy+PiP, A1 fala głosu, A2 muzyka, A3 SFX, znaczniki krytyka (C1–C9: kody z `critic.py`). Kółko = zoom osi, przeciągnięcie grafiki = przesunięcie (zaczepia się do najbliższego słowa + przesunięcie). |
+| Oś | V1 ujęcia (kolor = zoom: statyczny / na cięciu / drift / najazd / ręczny), V2 grafiki, V3 slajdy+PiP, A1 fala głosu, A2 muzyka, A3 SFX, znaczniki krytyka (C1–C10: kody z `critic.py`; C10 = gramatyka montażu: auto-najazdy bez momentu, moment bez sugerowanej grafiki). Kółko = zoom osi, przeciągnięcie grafiki = przesunięcie (zaczepia się do najbliższego słowa + przesunięcie). |
 | Transkrypcja | klik = wytnij / przywróć słowo; Alt+klik = najazd; Shift+klik = zaczep zaznaczoną grafikę. Klawiatura: strzałki po słowach, Enter / Alt+Enter / Shift+Enter. Najazd podkreślony falą = nie widać go w filmie (limit zoomu `zmax`, ramka grafiki albo początek ujęcia). |
 | Inspektor | ujęcie: zoom a/b/t0/t1 (max `zmax` z face_track) + klatka z kadrem i głową; najazd: siła, czas, usuń; grafika: tekst, podtytuł, ikona Lucide, typ, długość, przesunięcie, usuń / duplikuj / nowa. |
 | Ustawienia filmu | drift, zoomy na cięciach, ogon, pasek postępu, hook_text, głośność muzyki i SFX, seed muzyki. |
 | Podgląd ±10 s | render 360p (`assemble.py --proxy`) wokół znacznika, do `render/panel/preview/`. Każdy podgląd startuje wyciszony (dźwięk po kliknięciu głośnika). Pełnego renderu nie zmienia. W trakcie podglądu zmiany grafik czekają (render grafik czyta opis raz). |
 | Krytyk | odświeżany po każdej zmianie (przeliczenie = build_edl + face_track + critic). „Popraw automatycznie” = `critic.py --fix` na kopii planu i diff do akceptacji; „Akceptuję” = wyjątek z powodem (`critic_accept`), dopasowany do **dokładnego** tekstu uwagi: wiele uwag ma w treści czasy (C1, C3, C4), więc po edycji, która je przesunie, uwaga wraca jako nowa i trzeba ją zaakceptować jeszcze raz (stary wyjątek zostaje w planie, nic nie robi). Waga uwagi jest podana słowem i kolorem. Uwagi i znaczniki grafik w tekście: Tab + Enter. |
 | Render | `run_v4.sh` w kolejce, log na żywo (wraca po odświeżeniu strony), ostrzeżenie przy baterii < 40 % bez ładowania. Stop (z potwierdzeniem) zatrzymuje zadania panelu; przy renderze też `stop_render.py`, który kończy **każdy** render pipeline'u na laptopie. W trakcie renderu (także uruchomionego z terminala dla tego projektu, ścieżką pełną albo względną) panel nie zapisuje zmian, a przy renderze spoza panelu nie uruchamia też Sprawdź / Podgląd / Popraw (przeliczają EDL, który czyta render). |
+| Momenty | pas „Momenty” na osi: momenty montażu (hak, liczba, kontrast, puenta, lista, pytanie…) wykryte z tekstu nagrania i efekt, jaki dostały wg gramatyki montażu (`~/video-pipeline/style/grammar.json`, osobno long 16:9 i short 9:16): najazd, „odstęp” (inny najazd za blisko), „cisza” (moment poboczny, kadr i tak żyje), „ramka” (grafika z boku jest efektem), „cięcie” (słowo wycięte), „wył.”. „rytm” = najazd tylko dlatego, że kadr stał za długo (bez momentu). „Rozpoznaj momenty” = `beats.py --gfx` (reguły; lokalny model z `--llm`, gdy działa), propozycja w oknie, „Zastosuj” zapisuje przez historię (cofalne); w shortach dochodzą pionowe karty liczb. Ctrl+klik na słowie = nowy moment; inspektor: typ, wyłącz, wymuś. Lokalny model (`--llm`, w panelu `POST …/beats?llm=1`): `~/AI/ai.sh start chat` = llama.cpp w kontenerze na `127.0.0.1:8081` (adres zmienia `BEATS_LLM_URL` — tylko lokalny, bo idzie tam tekst nagrania); wyłączony albo zwraca coś dziwnego = same reguły (komunikat „llm: niedostępny” w logu zadania). |
 | Historia | kopia pliku przed każdym zapisem (`render/panel/history/<projekt>/`, ostatnie 500; stan sprzed pierwszej edycji panelu na stałe w `original/`), Ctrl+Z / Ctrl+Shift+Z. Historia jest jedna na projekt: cofnięcie może dotyczyć innego filmu (komunikat to mówi) i przelicza ten film. Cofnięcie odmawia, jeśli plik zmienił ktoś poza panelem (np. `critic --fix` w pełnym renderze) — wtedy nic nie znika ze stosu. Historia żyje do zamknięcia panelu; kopie na dysku zostają. |
 
 ## Bezpieczeństwo (kto może wołać API)
@@ -71,6 +72,31 @@ Czyta je pipeline (minimalne zmiany w `build_edl.py`, `critic.py`, `assemble.py`
 | `seg_zoom` | `{"<wejście ujęcia w źródle, 2 miejsca>": zoom albo {"a","b","t0","t1"}}` | `build_edl.py` (potem `face_track.py` i tak tnie do `zmax`) |
 | `music_db`, `sfx_db` | liczby dB | `build_edl.py` -> EDL -> `music/make_beds.py` |
 | `critic_accept` | `[{"code","msg","reason"}]` | `critic.py`: nie zgłasza i nie poprawia automatycznie (także C6 w `--fix`) |
+| `beats` | `[{"type","word","src"?,"text"?,"off"?,"force"?}]` — moment montażu na słowie (indeks w transkrypcji); typy i efekty w `style/grammar.json` | `build_edl.py` -> `beatfx.py` (wybór najazdów zamiast ręcznego `emph`; ręczne `emph` bez `auto` zostają), `critic.py --fix` (wymusza moment zamiast losowego najazdu), `music/make_beds.py` (SFX tylko na najazdach momentów) |
+| `gfx_specs` `canvas: "v"`, `quote: true` | pionowa karta 1080x1920 w górnym pasie; `quote` = liczba wypowiedziana na głos (C9 tylko informuje) | `gfx/render.mjs`, `critic.py` (C2: karta pod hook_text = błąd) |
+
+Wynik w EDL (pisze `build_edl.py`, czytają `face_track.py`, `make_beds.py`, panel): `beat_fx` = `[{type, word, at, fx, gfx, sfx, broll?}]`
+(raport, jaki efekt dostał każdy moment) i `zoom.keys` = `[[t, zoom], ...]`, gdy w jednym ujęciu jest kilka najazdów
+(`assemble.py` składa je w jedno wyrażenie; `face_track.py` przesuwa każdy ruch pod `zmax` zamiast go spłaszczać).
+Ścieżka gramatyki jest stała (`~/video-pipeline/style/grammar.json`; plan jej nie wskazuje — plany przychodzą Syncthingiem).
+`grammar.json` jest sprawdzany przy wczytaniu (jeden walidator `beatfx.load_grammar`, używany też przez `beats.py` i `critic.py`:
+brakujący albo zły klucz = błąd z jego nazwą); gdy `build_edl.py`, `face_track.py` albo `make_beds.py` padnie, `run_v4.sh` pisze
+`FAILED <krok> <film>` do `render.log` i nie renderuje starego EDL (panel: „brak DONE”; test: `RunV4FailureTest`).
+Z kluczem `beats` próg C1 krytyka = `rules.<format>.max_static` z gramatyki (bez klucza stałe 40 s / 7 s jak dawniej).
+EDL zapisuje, którą gramatyką go zrobiono: `beat_grammar` = `{version, sha}` (12 znaków sha256 pliku) — treść tej wersji
+zostaje w `style/history/grammar-<sha>.json` (który film cięto którymi regułami; cofnięcie edycji progu = skopiuj stamtąd).
+`grammar.json` nie jest w gicie (otwarte pytania w ADR-0002). Metryka z ADR: `python3 ~/video-pipeline/beatfx.py edl_<film>.json`; po każdym udanym renderze `run_v4.sh` dopisuje ją do `render/beat_stats.log`.
+Sugestie `gfx`/`broll` w `beat_fx` to podpowiedzi dla montażysty (C10, inspektor momentu): automatycznie powstają tylko karty liczb
+(`beats.py --gfx`, `auto_gfx`); b-rolli pipeline nie wstawia sam.
+Moment, którego build_edl nie wykona, ma w raporcie powód zamiast „najazdu”: `box` (ramka z boku do końca ujęcia), `manual`
+(ręczny zoom ujęcia z panelu), `unknown` (typu nie ma już w gramatyce).
+
+**Wyłączenie gramatyki dla filmu (droga cofnięcia):** usuń klucz `beats` z planu (Ctrl+Z po „Rozpoznaj momenty” albo ręcznie
+w JSON-ie). Bez klucza skrypty działają jak przed gramatyką — to pilnuje `tests/test_pipeline_compat.py`, więc cofanie skryptów
+nie jest potrzebne. Uwaga: pierwszy Ctrl+klik „moment” włącza gramatykę dla filmu (panel to mówi), a usunięcie ostatniego
+momentu zostawia `beats: []` — gramatyka dalej działa (sam „rytm”). Kopie plików: `render/pipeline-snapshot-20261020-200753.tar.gz`
+= stan **sprzed panelu** (bez `--json`, `--proxy`, `seg_zoom`: przywrócenie zepsuje panel); stanu „panel bez gramatyki” nie ma
+osobno. Stan z gramatyką: `render/pipeline-snapshot-20261021-121014.tar.gz` (skrypty, `gfx/render.mjs`, `gfx/template.html`, `style/`).
 
 Kontrakty skryptów używane przez panel (bez nich skrypty działają jak przed panelem):
 
@@ -78,6 +104,7 @@ Kontrakty skryptów używane przez panel (bez nich skrypty działają jak przed 
 |---|---|---|
 | `critic.py plan.json --json <plik>` | flaga | `{"issues": [{code, sev, msg, at?, end?}], "fixes": [...], "accepted": [...], "total": s}`; kod wyjścia 1 = są błędy (to wynik, nie awaria) |
 | `assemble.py edl.json out --proxy` | flaga | szybkie kodowanie + skala 360p; bez flagi komendy ffmpeg identyczne |
+| `beats.py plan.json --gfx --json <plik> [--llm]` | flaga | propozycja `{beats, gfx, specs}`; bez `--write` niczego nie zapisuje (panel stosuje ją sam, przez historię) |
 | `assemble.py` | EDL `music_offset` (s) | `-ss` przed muzyką i SFX: podgląd wycinka zaczyna podkład od środka (pisze go tylko `preview.py`) |
 
 Nowe ustawienie filmu: jedna linia w `GLOBALS` (`montazownia/planops.py`, z walidacją) + jedno pole w `renderGlobals` (`ui/app.js`);
@@ -92,8 +119,8 @@ cd ~/video-pipeline/panel && .venv/bin/python -m unittest discover -s tests -v
 `test_integration.py` działa na kopii projektu 2026-10-20 w katalogu tymczasowym (~2 min, prawdziwe ffmpeg/Chrome); `MONTAZ_SLOW=0` go pomija.
 `test_pipeline_compat.py` porównuje obecne skrypty z wersją sprzed panelu w `tests/pipeline_baseline/*.py.orig` (w gicie panelu,
 bo `~/video-pipeline` nie jest w gicie; `.orig`, żeby linter nie czytał starego kodu); brak plików = test **pada**. To też droga
-cofnięcia zmian w `build_edl.py`/`critic.py`/`assemble.py` (`cp tests/pipeline_baseline/critic.py.orig ../critic.py`); pełny snapshot
-pipeline'u: `render/pipeline-snapshot-20261020-200753.tar.gz`. Systemowy `python3` (bez venv panelu) pomija testy HTTP.
+cofnięcia zmian w `build_edl.py`/`critic.py`/`assemble.py`/`make_beds.py`/`face_track.py` (`cp tests/pipeline_baseline/critic.py.orig ../critic.py`); pełny snapshot
+pipeline'u sprzed panelu: `render/pipeline-snapshot-20261020-200753.tar.gz`; z gramatyką: `render/pipeline-snapshot-20261021-121014.tar.gz`. Systemowy `python3` (bez venv panelu) pomija testy HTTP.
 
 ## Architektura
 

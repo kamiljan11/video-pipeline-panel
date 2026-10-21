@@ -24,6 +24,17 @@ class PreviewTest(unittest.TestCase):
         self.assertEqual(part["overlays"], [{"id": "g", "at": 0.0, "dur": 5.0}])
         self.assertEqual((part["progress"], part["music_offset"], part["tail"]), (False, 6.0, 0.0))
 
+    def test_slice_keeps_later_punches_of_a_keyframed_shot(self):
+        keys = [[0, 1.0], [0.2, 1.0], [0.4, 1.2], [6.0, 1.2], [6.034, 1.0], [6.2, 1.0], [6.5, 1.3]]
+        edl = {"segments": [{"src": "A", "in": 10.0, "out": 20.0,
+                             "zoom": {"a": 1.0, "b": 1.3, "t0": 0.2, "t1": 0.4, "keys": keys}}], "overlays": [], "tail": 0}
+        z = preview.slice_edl(edl, 6.1, 9.0)["segments"][0]["zoom"]
+        self.assertEqual(z["keys"], [[0.0, 1.0], [0.1, 1.0], [0.4, 1.3]])  # after the snap-back: punch again at 6.2-6.5
+        z = preview.slice_edl(edl, 3.0, 9.0)["segments"][0]["zoom"]
+        self.assertEqual(z["keys"][0], [0.0, 1.2])  # held punch, then snap back at 3.0 s of the window
+        self.assertEqual(z["keys"][2], [3.034, 1.0])
+        self.assertEqual(preview.slice_edl(edl, 7.0, 9.0)["segments"][0]["zoom"], 1.3)  # past every move: a still shot
+
     def test_shift_ass_keeps_window_events_from_zero(self):
         ass = "[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,Cap,,0,0,0,,raz\nDialogue: 0,0:00:05.50,0:00:07.00,Cap,,0,0,0,,dwa, trzy\n"
         out = preview.shift_ass(ass, 5.0, 6.0)

@@ -27,6 +27,12 @@ def _zoom_from(z, off: float, d: float):
     """Zoom of a segment whose first `off` seconds were cut away (d = new duration)."""
     if not isinstance(z, dict) or off <= 0:
         return z
+    if z.get("keys"):  # several punches in one shot (editing grammar): keep the moves after the cut, from the value at it
+        keys = [[0.0, round(_key_at(z["keys"], off), 4)]] + [[round(t - off, 3), v] for t, v in z["keys"] if t > off]
+        if len(keys) == 1:
+            return keys[0][1]
+        return {**z, "a": keys[0][1], "t0": round(max(0.0, z["t0"] - off), 3), "t1": round(max(0.0, z["t1"] - off), 3),
+                "keys": keys}
     t0, t1 = z["t0"] - off, z["t1"] - off
     if t1 <= 0:
         return z["b"]
@@ -34,6 +40,17 @@ def _zoom_from(z, off: float, d: float):
         a = z["a"] + (z["b"] - z["a"]) * (-t0) / (z["t1"] - z["t0"])
         return {"a": round(a, 4), "b": z["b"], "t0": 0.0, "t1": round(min(t1, d), 3)}
     return {**z, "t0": round(t0, 3), "t1": round(t1, 3)}
+
+
+def _key_at(keys: list, t: float) -> float:
+    """Zoom at time t through keyframes, eased like assemble.keys_expr (smoothstep between neighbours, held outside)."""
+    if t <= keys[0][0]:
+        return keys[0][1]
+    for (ta, za), (tb, zb) in pairwise(keys):
+        if t < tb:
+            x = min(max((t - ta) / max(tb - ta, 0.001), 0.0), 1.0)
+            return za + (zb - za) * x * x * (3 - 2 * x)
+    return keys[-1][1]
 
 
 def _track_from(track, off: float, d: float):

@@ -68,10 +68,49 @@ class Panel:
         report_p = pipeline.critic_report(self.work, film)
         report = read_json(report_p) if report_p.exists() else None
         edl = self.edl(plan)
+        g = self.grammar()
         return {"film": film, "plan": plan, "specs": self.specs(plan),
-                "timeline": timeline.build(plan, words, self.specs(plan), edl, report["issues"] if report else None),
+                "timeline": timeline.build(plan, words, self.specs(plan), edl, report["issues"] if report else None, g),
+                "beat_types": {k: v.get("label", k) for k, v in (g or {}).get("beats", {}).items()},
                 "critic": report, "history": self.history.state(), "rebuild_job": self.last_rebuild.get(film),
                 "source": plan["src"]}
+
+    def grammar(self) -> dict | None:
+        try:
+            return pipeline.grammar()
+        except (OSError, ValueError):
+            log.exception("style/grammar.json unreadable: moments shown without labels")
+            return None
+
+    def beat_types(self) -> list[str]:
+        g = self.grammar()
+        if not g:
+            raise HTTPException(500, "brak gramatyki montażu (style/grammar.json)")
+        return list(g["beats"])
+
+    def apply_beats(self, film: str, job_id: int) -> dict:
+        self.guard()
+        j = self.runner.jobs.get(job_id)
+        if not j or j.kind != "beats" or j.film != film or j.status != "done":
+            raise HTTPException(400, "najpierw „Rozpoznaj momenty” musi się skończyć")
+        if store.plan_path(self.work, film).read_text(encoding="utf-8") != j.result["base"]:
+            raise HTTPException(409, "plan zmienił się od rozpoznania; uruchom rozpoznanie jeszcze raz")
+        prop = j.result["proposal"]
+        plan = self.plan(film)
+        n = len(store.words_of(self.work, plan))
+        if prop.get("specs"):
+            self.no_gfx_render()
+            for sp in prop["specs"]:
+                _known_icons(sp)
+            if not plan.get("gfx_specs"):  # a short gets its first graphic: the project's shared specs file and gfx dir
+                plan = {**plan, "gfx_specs": "gfx_specs.json", "gfx_dir": str(self.work / "gfx")}
+        p2, s2 = planops.apply_beats(plan, self.specs(plan), prop, self.beat_types(), n)  # validated before anything is written
+        sp = store.specs_path(self.work, p2) if prop.get("specs") else None
+        if sp is not None and not sp.exists():  # fresh project: the history saves into an existing file
+            if not sp.resolve().is_relative_to(self.work.resolve()):  # the plan comes via Syncthing: never create outside the project
+                raise HTTPException(400, "plik grafik (gfx_specs) poza katalogiem projektu")
+            store.atomic_write(sp, "[]")
+        return self.save(film, "momenty montażu", p2, s2 if prop.get("specs") else None)
 
     # ---- writing ----
     def guard(self) -> None:
@@ -216,6 +255,14 @@ class Panel:
             if seg is None:
                 raise EditError("tego ujęcia już nie ma (zmieniły się cięcia), odśwież")
             return self.save(film, "zoom ujęcia", planops.set_segment_zoom(plan, seg_in, a.get("zoom"), seg.get("zmax")))
+        if op == "set_beat":
+            return self.save(film, "zmiana momentu", planops.set_beat(plan, int(a["pos"]), _obj(a["fields"]), self.beat_types()))
+        if op == "add_beat":
+            i = int(a["i"])
+            around = "".join(texts[max(0, i - 6):i + 10]).strip()[:300]  # the sentence around it: beats.py picks a card icon from it
+            return self.save(film, f"moment na „{texts[i].strip()}”", planops.add_beat(plan, i, str(a.get("type")), self.beat_types(), around))
+        if op == "remove_beat":
+            return self.save(film, "usuń moment", planops.remove_beat(plan, int(a["pos"])))
         if op == "globals":
             return self.save(film, "ustawienia filmu", planops.set_globals(plan, _obj(a["values"])))
         if op == "accept":
@@ -349,6 +396,14 @@ def create_app(panel: Panel) -> FastAPI:
         if store.plan_path(panel.work, film).read_text(encoding="utf-8") != j.result["base"]:
             raise HTTPException(409, "plan zmienił się od podglądu poprawek; uruchom podgląd jeszcze raz")
         return panel.save(film, "poprawki krytyka", j.result["plan"])
+
+    @app.post("/api/film/{film}/beats")
+    def beats(film: str, llm: bool = False) -> dict:
+        return submit_once("beats", panel.known(film), lambda: pipeline.beats_steps(panel.work, film, llm))
+
+    @app.post("/api/film/{film}/beats-apply")
+    def beats_apply(film: str, job: int) -> dict:
+        return panel.apply_beats(panel.known(film), job)
 
     @app.post("/api/film/{film}/preview")
     def preview(film: str, t: float) -> dict:

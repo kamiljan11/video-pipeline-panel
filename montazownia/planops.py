@@ -10,7 +10,7 @@ from __future__ import annotations
 import copy
 import re
 import unicodedata
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 Plan = dict[str, Any]
@@ -20,7 +20,8 @@ Specs = list[dict[str, Any]]
 GFX_WINDOW, EMPH_WINDOW = 25, 30
 NO_FACE_LIMIT = 2.0  # face_track sets no zmax when it found no face in a shot: no head to keep in frame (UI says so)
 SPEC_TYPES = ("kw", "list", "lower", "chap", "cta", "slide", "end")
-SPEC_FIELDS = {"text", "sub", "icon", "icons", "items", "delays", "type", "dur", "html", "src"}
+SPEC_FIELDS = {"text", "sub", "icon", "icons", "items", "delays", "type", "dur", "html", "src",
+               "canvas", "quote", "beat"}  # the last three: cards of the editing grammar (beats.py)
 
 
 class EditError(ValueError):
@@ -277,6 +278,90 @@ def accept_issue(plan: Plan, code: Any, msg: Any, reason: Any) -> Plan:
     return p
 
 
+# ---- editing grammar: moments ("beats", ../style/grammar.json) detected by ../beats.py, effects chosen by ../beatfx.py ----
+BEAT_SRC = ("rule", "llm", "manual")
+MAX_BEATS = 2000
+GFX_ID = re.compile(r"[A-Za-z0-9_-]{1,80}")
+
+
+def _beat(b: Any, types: Iterable[str], n_words: int) -> dict:
+    types = tuple(types)
+    if not isinstance(b, dict) or b.get("type") not in types:
+        raise EditError(f"typ momentu: {', '.join(types)}")
+    w = b.get("word")
+    if not isinstance(w, int) or isinstance(w, bool) or not 0 <= w < n_words:
+        raise EditError("moment: słowo poza transkrypcją")
+    out = {"type": b["type"], "word": w, "src": b.get("src") if b.get("src") in BEAT_SRC else "manual"}
+    if "text" in b:
+        out["text"] = _str(b["text"], "tekst momentu")
+    for k in ("off", "force"):
+        if b.get(k):
+            out[k] = True
+    return out
+
+
+def apply_beats(plan: Plan, specs: Specs, proposal: Any, types: Iterable[str], n_words: int) -> tuple[Plan, Specs]:
+    """Take a beats.py proposal: plan["beats"], the automatic graphics it made (new ids only) and no time-based auto emph
+    (with beats every punch needs a moment; manual punch-ins stay)."""
+    if not isinstance(proposal, dict) or not isinstance(proposal.get("beats"), list) or len(proposal["beats"]) > MAX_BEATS:
+        raise EditError("zła propozycja momentów")
+    types = tuple(types)
+    p, have = copy.deepcopy(plan), {sp["id"] for sp in specs}
+    p["beats"] = [_beat(b, types, n_words) for b in proposal["beats"]]
+    p["emph"] = [e for e in p.get("emph", []) if not e.get("auto")]
+    new_specs = [_clean_spec(sp) for sp in _list(proposal.get("specs", []), "grafiki momentów") if sp.get("id") not in have]
+    ids = set()
+    for sp in new_specs:
+        if not isinstance(sp.get("id"), str) or not GFX_ID.fullmatch(sp["id"]):
+            raise EditError("id grafiki: litery, cyfry, _ i -")
+        ids.add(sp["id"])
+    for g in _list(proposal.get("gfx", []), "grafiki momentów"):
+        if isinstance(g, dict) and g.get("id") in ids:
+            if not isinstance(g.get("word"), int) or not 0 <= g["word"] < n_words:
+                raise EditError("grafika momentu: słowo poza transkrypcją")
+            p.setdefault("gfx", []).append({"id": g["id"], "word": g["word"], "lead": _bounded(g.get("lead", 0.0), -5, 5, "wyprzedzenie")})
+    return p, [*copy.deepcopy(specs), *new_specs]
+
+
+def set_beat(plan: Plan, pos: int, fields: dict, types: Iterable[str]) -> Plan:
+    """Editor's decision on one moment: another type (becomes manual, so a new detection keeps it), off, force."""
+    p = copy.deepcopy(plan)
+    b = _at(p.get("beats", []), pos, "moment")
+    for k, v in fields.items():
+        if k == "type":
+            if v not in tuple(types):
+                raise EditError(f"typ momentu: {', '.join(types)}")
+            b["type"], b["src"] = v, "manual"
+        elif k in ("off", "force"):
+            if v:
+                b[k] = True
+            else:
+                b.pop(k, None)
+        else:
+            raise EditError(f"nieznane pole momentu: {k}")
+    if b.get("off") and b.get("force"):
+        raise EditError("moment nie może być jednocześnie wyłączony i wymuszony")
+    return p
+
+
+def add_beat(plan: Plan, i: int, beat_type: str, types: Iterable[str], text: str = "") -> Plan:
+    if i not in kept_indices(plan):
+        raise EditError("moment tylko na słowie, które zostaje w filmie")
+    if any(b["word"] == i for b in plan.get("beats", [])):
+        raise EditError("na tym słowie już jest moment")
+    p = copy.deepcopy(plan)
+    p.setdefault("beats", []).append(_beat({"type": beat_type, "word": i, "src": "manual", "text": text}, tuple(types), i + 1))
+    p["beats"].sort(key=lambda b: b["word"])
+    return p
+
+
+def remove_beat(plan: Plan, pos: int) -> Plan:
+    p = copy.deepcopy(plan)
+    _at(p.get("beats", []), pos, "moment")
+    del p["beats"][pos]
+    return p
+
+
 def _zoom_ok(z: float, limit: float) -> float:
     if z < 1.0:
         raise EditError("zoom nie może być mniejszy niż 1.0")
@@ -333,7 +418,7 @@ def _clean_spec(s: dict) -> dict:
         out["text"] = [_str(x, "tekst grafiki") for x in s["text"]]
     elif "text" in s:
         out["text"] = _str(s["text"], "tekst grafiki")
-    for k in ("sub", "src"):
+    for k in ("sub", "src", "beat"):
         if k in s:
             out[k] = _str(s[k], k)
     if "html" in s:
@@ -342,6 +427,10 @@ def _clean_spec(s: dict) -> dict:
         out["icon"] = _icon(s["icon"])
     if "icons" in s:
         out["icons"] = [_icon(x) for x in _list(s["icons"], "ikony")]
+    if "canvas" in s and s["canvas"] != "v":
+        raise EditError("format grafiki: canvas \"v\" (9:16) albo brak (16:9)")
+    if "quote" in s:
+        out["quote"] = bool(s["quote"])
     if "delays" in s:
         out["delays"] = [_bounded(x, 0, 60, "opóźnienia") for x in _list(s["delays"], "opóźnienia")]
     if s["type"] == "list" or "items" in s:

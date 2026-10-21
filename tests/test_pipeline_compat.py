@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 
 PIPE = Path(__file__).resolve().parents[2]
-BASELINE = Path(__file__).resolve().parent / "pipeline_baseline"  # build_edl.py, critic.py, assemble.py before the panel
+BASELINE = Path(__file__).resolve().parent / "pipeline_baseline"  # build_edl, critic, assemble before the panel; make_beds, face_track before beats
 SAMPLE = Path.home() / "Videos" / "Montaz" / "2026-10-20" / "work"
 FILM = "short3_jedno_zlecenie"
 
@@ -27,12 +27,15 @@ open(sys.argv[-1], "wb").close()
 """
 
 
-@unittest.skipUnless(SAMPLE.is_dir(), "needs the sample project ~/Videos/Montaz/2026-10-20")
+# no sample project = these tests FAIL (they are the "without beats nothing changed" guarantee); a machine that
+# really has no sample opts out explicitly with MONTAZ_NO_SAMPLE=1
+@unittest.skipIf(os.environ.get("MONTAZ_NO_SAMPLE") == "1", "MONTAZ_NO_SAMPLE=1: compatibility with the old scripts not checked")
 class CompatTest(unittest.TestCase):
     def setUp(self):
+        self.assertTrue(SAMPLE.is_dir(), f"needs the sample project {SAMPLE} (or MONTAZ_NO_SAMPLE=1 to skip on purpose)")
         # the baseline IS the guarantee: without it these tests must fail loudly, never pass by skipping
         origs = sorted(BASELINE.glob("*.py.orig"))
-        self.assertEqual([o.name for o in origs], ["assemble.py.orig", "build_edl.py.orig", "critic.py.orig"])
+        self.assertEqual([o.name for o in origs], ["assemble.py.orig", "build_edl.py.orig", "critic.py.orig", "face_track.py.orig", "make_beds.py.orig"])
         self.tmp = Path(tempfile.mkdtemp(prefix="montaz-compat-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.base = self.tmp / "baseline"  # stored as .orig so linters skip the old code; run as .py from here
@@ -107,6 +110,145 @@ class CompatTest(unittest.TestCase):
         self.write_plan({**long, "critic_accept": [{"code": "C6", "msg": msg, "reason": "test"}]}, "long")
         self.run_script(PIPE, "critic.py", "plan_long.json", "--fix")
         self.assertEqual(json.loads((self.work / "plan_long.json").read_text())["tail"], 0)  # accepted: left alone
+
+    def beds(self, script, edl, name):
+        edl_p = self.tmp / f"edl-{name}.json"
+        edl_p.write_text(json.dumps(edl))
+        out = self.tmp / f"beds-{name}"
+        py = PIPE / ".venv" / "bin" / "python"  # make_beds needs NumPy: the pipeline venv, as in run_v4.sh
+        r = subprocess.run([str(py), str(script), str(edl_p), str(out)], cwd=self.work, capture_output=True, text=True, check=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return (out / "sfx.wav").read_bytes()
+
+    def test_make_beds_unchanged_without_beat_fx(self):
+        shutil.copy(PIPE / "music" / "gen_music.py", self.base / "gen_music.py")  # make_beds calls it from its own dir
+        edl = json.loads((SAMPLE / f"edl_{FILM}.json").read_text())
+        edl = {k: v for k, v in edl.items() if k != "beat_fx"}
+        self.assertEqual(self.beds(self.base / "make_beds.py", edl, "old"), self.beds(PIPE / "music" / "make_beds.py", edl, "new"))
+
+    def test_beat_fx_silences_punches_unless_the_moment_has_a_sound(self):
+        punch = {"src": "A", "in": 0.0, "out": 4.0, "zoom": {"a": 1.0, "b": 1.2, "t0": 1.0, "t1": 1.3}}
+        edl = {"segments": [punch], "tail": 0}
+        mk = PIPE / "music" / "make_beds.py"
+        self.assertTrue(any(self.beds(mk, edl, "plain")[44:]))  # old behaviour: whoosh on every punch
+        self.assertFalse(any(self.beds(mk, {**edl, "beat_fx": [{"at": 1.0, "fx": "punch", "sfx": None}]}, "silent")[44:]))
+        self.assertTrue(any(self.beds(mk, {**edl, "beat_fx": [{"at": 1.0, "fx": "punch", "sfx": "ding"}]}, "ding")[44:]))
+
+    def test_beats_key_drives_punches_and_critic_never_adds_random_ones(self):
+        self.write_plan({**self.plan, "emph": [*self.plan.get("emph", []), {"word": 1300, "amt": 0.1, "auto": True}]})
+        r = self.run_script(PIPE, "beats.py", f"plan_{FILM}.json", "--write")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        edl = json.loads(self.edl_from(PIPE)[0])
+        rows = edl["beat_fx"]
+        self.assertTrue(rows and all(r["fx"] in {"punch", "spacing", "quiet", "none", "box", "gfx", "cut", "off", "manual", "unknown"} for r in rows))
+        punches = [s for s in edl["segments"] if isinstance(s["zoom"], dict) and s["zoom"]["t0"] > 0.01]
+        manual = [e for e in self.plan.get("emph", []) if not e.get("auto")]
+        self.assertLessEqual(len(punches), sum(r["fx"] == "punch" for r in rows) + len(manual))
+        self.run_script(PIPE, "critic.py", f"plan_{FILM}.json", "--fix")
+        plan = json.loads((self.work / f"plan_{FILM}.json").read_text())
+        self.assertFalse([e for e in plan.get("emph", []) if e.get("auto")])
+
+    def critic_issues(self, specs, gfx, **extra):
+        (self.work / "specs.json").write_text(json.dumps(specs))
+        self.write_plan({**self.plan, "gfx_specs": "specs.json", "gfx_dir": str(self.work / "gfx"), "gfx": gfx, **extra})
+        self.edl_from(PIPE)
+        r = self.run_script(PIPE, "critic.py", f"plan_{FILM}.json", "--json", str(self.tmp / "c.json"))
+        self.assertIn(r.returncode, (0, 1), r.stderr)
+        return json.loads((self.tmp / "c.json").read_text())["issues"]
+
+    def test_critic_quote_card_numbers_must_be_said_while_it_is_on_screen(self):
+        card = {"type": "kw", "sub": "ekranów", "dur": 2.5, "icon": "hash", "quote": True, "canvas": "v"}
+        specs = [{**card, "id": "said", "text": "~60"}, {**card, "id": "elsewhere", "text": "40"}]
+        # "60" is spoken at word 1151 (~5 s); "40" only at word 1286 (~38 s), so a 40 card at 5 s quotes nothing
+        issues = self.critic_issues(specs, [{"id": "said", "word": 1151, "lead": 0.0}, {"id": "elsewhere", "word": 1158, "lead": 0.0}],
+                                    hook_text="")
+        c9 = {i["msg"].split()[1].rstrip(":"): i["sev"] for i in issues if i["code"] == "C9"}
+        self.assertEqual(c9, {"said": "info", "elsewhere": "error"})
+
+    def test_critic_vertical_card_under_the_hook_title_is_an_error(self):
+        specs = [{"id": "early", "type": "kw", "text": "Start", "sub": "", "dur": 2.0, "icon": "hash", "canvas": "v"}]
+        issues = self.critic_issues(specs, [{"id": "early", "word": 1145, "lead": 0.0}])  # hook_text shows for 3 s
+        self.assertTrue([i for i in issues if i["code"] == "C2" and "early" in i["msg"] and i["sev"] == "error"], issues)
+
+    def test_critic_c10_moment_without_its_graphic(self):
+        self.write_plan(self.plan)
+        self.assertEqual(self.run_script(PIPE, "beats.py", f"plan_{FILM}.json", "--write").returncode, 0)
+        beats = json.loads((self.work / f"plan_{FILM}.json").read_text())["beats"]
+        issues = self.critic_issues([], [], beats=beats)
+        c10 = [i for i in issues if i["code"] == "C10"]
+        self.assertTrue(any("sugerowana grafika" in i["msg"] for i in c10), c10)  # e.g. the closing maxim asks for a kw card
+        self.assertTrue(all(i["sev"] == "info" for i in c10))
+
+    def test_beats_cli_without_cards_leaves_gfx_keys_alone(self):
+        plan = {k: v for k, v in self.plan.items() if k not in ("gfx_specs", "gfx_dir")}
+        plan["keeps"] = [[1141, 1149]]  # the first phrase: no number, so no card
+        self.write_plan(plan)
+        r = self.run_script(PIPE, "beats.py", f"plan_{FILM}.json", "--gfx", "--write")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        saved = json.loads((self.work / f"plan_{FILM}.json").read_text())
+        self.assertNotIn("gfx_specs", saved)  # pointing at a file that was never written would break build_edl
+        self.assertTrue(saved["beats"])
+        edl = json.loads(self.edl_from(PIPE)[0])
+        self.assertEqual(sorted(edl["beat_grammar"]), ["sha", "version"])
+
+    def test_face_track_unchanged_without_beat_fx(self):
+        edl = json.loads((SAMPLE / f"edl_{FILM}.json").read_text())
+        edl = {k: v for k, v in edl.items() if k != "beat_fx"}
+        for s in edl["segments"]:  # as build_edl wrote it: face_track adds these
+            for k in ("face", "head", "zmax", "track"):
+                s.pop(k, None)
+        py = PIPE / ".venv" / "bin" / "python"
+        out = []
+        for root, name in ((self.base, "old"), (PIPE, "new")):
+            d = self.tmp / f"ft-{name}"
+            d.mkdir()
+            shutil.copy(SAMPLE / "faces_cache.json", d / "faces_cache.json")  # same cache: no video decoding differences
+            (d / "edl.json").write_text(json.dumps(edl))
+            r = subprocess.run([str(py), str(root / "face_track.py"), str(d / "edl.json")], capture_output=True, text=True, check=False)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            out.append((d / "edl.json").read_text())
+        self.assertEqual(out[0], out[1])
+
+    def test_face_track_keeps_beat_punches_visible_under_the_head_limit(self):
+        edl = json.loads((SAMPLE / f"edl_{FILM}.json").read_text())
+        edl["beat_fx"] = []
+        segs = edl["segments"]
+        segs[1]["zoom"] = {"a": 1.3, "b": 1.38, "t0": 0.0, "t1": 0.2}  # punch on the shot's first word, far over any zmax
+        segs[2]["zoom"] = {"a": 1.3, "b": 1.38, "t0": 0.0, "t1": round(segs[2]["out"] - segs[2]["in"], 3)}  # slow drift
+        d = self.tmp / "ft-beats"
+        d.mkdir()
+        shutil.copy(SAMPLE / "faces_cache.json", d / "faces_cache.json")
+        (d / "edl.json").write_text(json.dumps(edl))
+        py = PIPE / ".venv" / "bin" / "python"
+        r = subprocess.run([str(py), str(PIPE / "face_track.py"), str(d / "edl.json")], capture_output=True, text=True, check=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        punch, drift = json.loads((d / "edl.json").read_text())["segments"][1:3]
+        self.assertIsInstance(punch["zoom"], dict)
+        self.assertGreater(punch["zoom"]["b"] - punch["zoom"]["a"], 0.005)  # still a move, not flattened
+        self.assertLessEqual(punch["zoom"]["b"], punch["zmax"])
+        self.assertEqual(drift["zoom"], drift["zmax"])  # drift clamped (flattened) as before
+
+    def test_zoom_keyframes_render_several_moves_in_one_shot(self):
+        keys = [[0, 1.0], [0.2, 1.0], [0.4, 1.2], [0.966, 1.2], [1.0, 1.0], [1.3, 1.3]]
+        edl = {"sources": {"A": "src.mp4"}, "segments": [{"src": "A", "in": 0.0, "out": 2.0,
+               "zoom": {"a": 1.0, "b": 1.3, "t0": 0.2, "t1": 0.4, "keys": keys}}], "overlays": [], "w": 640, "h": 360,
+               "src_w": 640, "src_h": 360, "out_name": "x.mp4"}
+        p = self.tmp / "edl_keys.json"
+        p.write_text(json.dumps(edl))
+        cut = next(json.loads(c) for c in self.ffmpeg_calls(PIPE, p) if "-vf" in json.loads(c))
+        self.assertIn("_k", cut[-1])  # the segment cache name follows the keyframes
+        vf = cut[cut.index("-vf") + 1]
+        frames = self.tmp / "kf"
+        frames.mkdir()
+        r = subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=640x360:r=30:d=2,drawgrid=w=40:h=40:t=2:c=white",
+                            "-vf", vf, "-frames:v", "60", str(frames / "f%02d.png")], capture_output=True, text=True, check=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        f = {n: (frames / f"f{n:02d}.png").read_bytes() for n in (1, 5, 15, 25, 55, 60)}
+        self.assertEqual(f[1], f[5])  # wide before the first moment
+        self.assertNotEqual(f[15], f[1])  # first punch
+        self.assertEqual(f[15], f[25])  # held
+        self.assertNotIn(f[55], (f[1], f[25]))  # second punch, after the snap back
+        self.assertEqual(f[55], f[60])
 
     def ffmpeg_calls(self, root, edl_path, *flags):
         bindir = self.tmp / "bin"

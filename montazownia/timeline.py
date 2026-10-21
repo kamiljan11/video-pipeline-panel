@@ -69,9 +69,12 @@ def sfx_events(edl: dict, specs: dict[str, dict]) -> list[dict]:
     acc = 0.0
     for s in edl["segments"]:
         z = s.get("zoom")
-        if isinstance(z, dict) and z["t0"] > 0.01 and z["b"] > z["a"] + 0.1:
+        if "beat_fx" not in edl and isinstance(z, dict) and z["t0"] > 0.01 and z["b"] > z["a"] + 0.1:
             ev.append((acc + z["t0"] - 0.05, "whoosh"))
         acc += s["out"] - s["in"]
+    for r in edl.get("beat_fx", []):  # editing grammar: a punch sounds only when its moment asks for it
+        if r.get("fx") == "punch" and r.get("sfx") in ("pop", "whoosh", "ding"):
+            ev.append((r["at"] - (0.05 if r["sfx"] == "whoosh" else 0.0), r["sfx"]))
     return [{"t": round(max(0.0, t), 3), "kind": k} for t, k in sorted(ev)]
 
 
@@ -105,6 +108,28 @@ def words_view(plan: dict, words: list[dict], edl: dict | None) -> list[dict]:
     return res
 
 
+def beats_view(plan: dict, words: list[dict], edl: dict | None, grammar: dict | None) -> list[dict]:
+    """Moments of the plan with what build_edl/beatfx did with each (edl beat_fx), plus "pace" rhythm punches."""
+    kinds = (grammar or {}).get("beats", {})
+    rows = {(r["word"], r["type"]): r for r in (edl or {}).get("beat_fx", [])}
+    segs = edl["segments"] if edl else []
+    res = []
+    for pos, b in enumerate(plan.get("beats", [])):
+        r = rows.get((b["word"], b["type"]), {})
+        t = words[b["word"]]["offsets"]["from"] / 1000 if b["word"] < len(words) else 0.0
+        res.append({"pos": pos, "type": b["type"], "label": kinds.get(b["type"], {}).get("label", b["type"]),
+                    "word": b["word"], "text": words[b["word"]]["text"].strip() if b["word"] < len(words) else "",
+                    "at": r.get("at", round(src2out(segs, t), 3) if segs else None), "fx": r.get("fx"),
+                    "gfx": r.get("gfx"), "sfx": r.get("sfx"), "broll": r.get("broll"), "src": b.get("src"),
+                    "off": bool(b.get("off")), "force": bool(b.get("force"))})
+    for r in (edl or {}).get("beat_fx", []):
+        if r["type"] == "pace":
+            res.append({"pos": None, "type": "pace", "label": "rytm", "word": r["word"],
+                        "text": words[r["word"]]["text"].strip() if r["word"] < len(words) else "", "at": r["at"],
+                        "fx": r["fx"], "gfx": None, "sfx": None, "broll": None, "src": "beatfx", "off": False, "force": False})
+    return sorted(res, key=lambda x: (x["at"] is None, x["at"] or 0.0))
+
+
 _T_PAREN = re.compile(r"\((\d+(?:\.\d+)?)s\)")
 _T_AT = re.compile(r"w (\d+(?:\.\d+)?)s")
 _T_SRC = re.compile(r"przy (\d+(?:\.\d+)?)s źródła")
@@ -127,10 +152,11 @@ def issue_time(issue: dict, edl: dict, total: float) -> float | None:
     return None
 
 
-def build(plan: dict, words: list[dict], specs_list: list[dict], edl: dict | None, issues: list[dict] | None) -> dict:
+def build(plan: dict, words: list[dict], specs_list: list[dict], edl: dict | None, issues: list[dict] | None,
+          grammar: dict | None = None) -> dict:
     specs = {s["id"]: s for s in specs_list}
     if edl is None:
-        return {"ready": False, "words": words_view(plan, words, None)}
+        return {"ready": False, "words": words_view(plan, words, None), "beats": beats_view(plan, words, None, grammar)}
     body = sum(s["out"] - s["in"] for s in edl["segments"])
     total = body + edl.get("tail", 0)
     marks = []
@@ -143,5 +169,5 @@ def build(plan: dict, words: list[dict], specs_list: list[dict], edl: dict | Non
         "segments": segments_view(edl, plan), "overlays": overlays_view(edl, specs), "sfx": sfx_events(edl, specs),
         "music": {"seed": edl.get("music_seed", 7), "db": edl.get("music_db", -13), "sfx_db": edl.get("sfx_db", -12),
                   "file": edl.get("music")},
-        "issues": marks, "words": words_view(plan, words, edl),
+        "issues": marks, "words": words_view(plan, words, edl), "beats": beats_view(plan, words, edl, grammar),
     }

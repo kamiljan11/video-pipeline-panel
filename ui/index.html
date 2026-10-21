@@ -20,6 +20,7 @@
   <button id="redo" class="ghost" title="Ponów (Ctrl+Shift+Z)">↷ Ponów</button>
   <span class="sep"></span>
   <button id="check" title="build_edl → face_track → krytyk">Sprawdź</button>
+  <button id="beats" class="ghost" title="beats.py: momenty z tekstu (liczba, zwrot, puenta…) → efekty wg gramatyki montażu">Rozpoznaj momenty</button>
   <button id="fix" class="ghost" title="critic --fix na kopii planu, z podglądem zmian">Popraw automatycznie</button>
   <button id="preview" title="Fragment ±10 s wokół znacznika, niska rozdzielczość">▶ Podgląd ±10 s</button>
   <span class="sep"></span>
@@ -39,6 +40,9 @@
         <span><i class="sw k-static"></i>statyczny</span><span><i class="sw k-zoom"></i>zoom na cięciu</span>
         <span><i class="sw k-drift"></i>drift</span><span><i class="sw k-emph"></i>najazd</span>
         <span><i class="sw k-override"></i>ręczny zoom</span>
+        <span><i class="sw b-punch"></i>moment z efektem</span><span><i class="sw b-none"></i>moment bez efektu</span>
+        <span><i class="sw b-punch b-force"></i>wymuszony</span><span><i class="sw b-none b-unknown"></i>typ spoza gramatyki</span>
+        <span class="b-off">wyłączony</span>
         <span class="muted">klik w oś = znacznik (podgląd, nowa grafika) · kółko = zoom osi · przeciągnij grafikę = przesuń</span>
       </div>
     </div>
@@ -68,7 +72,7 @@
     <div id="transhead">
       <strong>Transkrypcja</strong>
       <label class="muted"><input type="checkbox" id="allwords"> cała</label>
-      <span class="muted hint">klik = wytnij / przywróć · Alt+klik = najazd · Shift+klik = zaczep zaznaczoną grafikę · klawiatura: strzałki + Enter (Alt/Shift jak wyżej)</span>
+      <span class="muted hint">klik = wytnij / przywróć · Alt+klik = najazd · Ctrl+klik = moment · Shift+klik = zaczep zaznaczoną grafikę · klawiatura: strzałki + Enter (Alt/Ctrl/Shift jak wyżej)</span>
     </div>
     <div id="transcript" tabindex="0" role="listbox" aria-label="Transkrypcja: słowo zaznaczone = zostaje w filmie"></div>
   </section>

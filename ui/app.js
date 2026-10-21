@@ -66,7 +66,7 @@ async function ask(title, value = "") {
 
 // ---------- jobs ----------
 // a button that starts a job stays disabled while a job of that kind runs (a second click would queue a copy)
-const JOB_BUTTONS = { check: "check", fix: "fix", preview: "preview", render: "render" };
+const JOB_BUTTONS = { check: "check", fix: "fix", beats: "beats", preview: "preview", render: "render" };
 function busy(kind, on) {
   S.running = S.running || {};
   if (on) S.running[kind] = true; else delete S.running[kind];
@@ -96,7 +96,7 @@ async function watchJob(id, onDone) {
   };
   tick();
 }
-const label = (k) => ({ rebuild: "Przeliczanie", check: "Krytyk", fix: "Poprawki", preview: "Podgląd", render: "Render" }[k] || k);
+const label = (k) => ({ rebuild: "Przeliczanie", check: "Krytyk", fix: "Poprawki", preview: "Podgląd", render: "Render", beats: "Momenty" }[k] || k);
 const statusPl = (s) => ({ queued: "w kolejce", running: "trwa", done: "gotowe", failed: "błąd", stopped: "zatrzymane" }[s] || s);
 
 // ---------- loading ----------
@@ -166,6 +166,12 @@ function buildItems(tl) {
   }
   it.push({ id: "music", group: "a2", start: T(0), end: T(tl.total), content: `muzyka (seed ${tl.music.seed}, ${tl.music.db} dB)`, className: "g-music" });
   tl.sfx.forEach((e, k) => it.push({ id: `sfx:${k}`, group: "a3", start: T(e.t), type: "point", content: e.kind, className: "g-sfx" }));
+  for (const [k, b] of (tl.beats || []).entries()) {
+    if (b.at == null) continue;
+    it.push({ id: b.pos != null ? `beat:${b.pos}` : `pace:${k}`, group: "mo", start: T(b.at), type: "point", content: esc(b.label),
+      className: `b-${b.fx || "none"}${b.off ? " b-off" : ""}${b.force ? " b-force" : ""}`,
+      title: esc(`${b.label} „${b.text}” · ${FX[b.fx] || "jeszcze nie przeliczony"}${b.gfx ? ` · grafika: ${b.gfx}` : ""}${b.broll ? ` · b-roll: ${b.broll}` : ""}${b.force ? " · wymuszony" : ""}`) });
+  }
   for (const c of tl.issues) {
     if (c.t == null) continue;
     it.push({ id: `iss:${c.id}`, group: "kr", start: T(c.t), type: "point", content: c.code, className: `c-${c.sev}`, title: esc(c.msg) });
@@ -176,7 +182,7 @@ function renderTimeline(fresh) {
   const tl = S.view.timeline;
   if (!tl.ready) { $("timeline").innerHTML = '<div class="muted" style="padding:20px">Brak EDL: kliknij „Sprawdź”, żeby zbudować oś.</div>'; S.timeline = null; return; }
   const groups = [
-    { id: "v1", content: "V1 ujęcia" }, { id: "v2", content: "V2 grafiki" }, { id: "v3", content: "V3 slajdy+PiP" },
+    { id: "mo", content: "Momenty" }, { id: "v1", content: "V1 ujęcia" }, { id: "v2", content: "V2 grafiki" }, { id: "v3", content: "V3 slajdy+PiP" },
     { id: "a2", content: "A2 muzyka" }, { id: "a3", content: "A3 SFX" }, { id: "kr", content: "Krytyk" }];
   const items = buildItems(tl);
   if (S.timeline && !fresh) {
@@ -194,7 +200,7 @@ function renderTimeline(fresh) {
     zoomMax: Math.max(10000, (tl.total + 2) * 1000), stack: false, showCurrentTime: false, selectable: true,
     editable: { updateTime: false, add: false, remove: false, overrideItems: false }, snap: null, orientation: "top",
     margin: { item: 4, axis: 4 }, format: { minorLabels: lab, majorLabels: () => "" }, groupHeightMode: "fixed",
-    onMove: (item, cb) => { cb(null); moveGfx(item); }, tooltip: { followMouse: true }, verticalScroll: false, height: 270,
+    onMove: (item, cb) => { cb(null); moveGfx(item); }, tooltip: { followMouse: true }, verticalScroll: false, height: 305,
   });
   S.timeline.addCustomTime(T(S.playhead), "ph");
   S.timeline.on("select", (p) => select(p.items[0] || null));
@@ -306,6 +312,10 @@ async function wordAction(i, e) {
     if (!S.sel || !S.sel.startsWith("gfx:")) return toast("najpierw zaznacz grafikę (na osi albo jej znacznik w tekście)", true);
     return editOp({ op: "anchor_gfx", id: S.sel.slice(4), i });
   }
+  if (e.ctrlKey || e.metaKey) {  // a word that already has a moment: open it instead of adding a second one
+    const at = (S.view.plan.beats || []).findIndex((b) => b.word === i);
+    return at >= 0 ? select(`beat:${at}`) : addBeat(i);
+  }
   if (e.altKey) {
     if (w.emph != null) { S.sel = `emph:${w.emph}`; renderInspector(); return; }
     await editOp({ op: "add_emph", i });
@@ -365,6 +375,8 @@ function renderInspector() {
   if (id.startsWith("seg:")) return inspectSegment(box, tl.segments[+id.slice(4)]);
   if (id.startsWith("gfx:")) return inspectGfx(box, id.slice(4));
   if (id.startsWith("emph:")) return inspectEmph(box, +id.slice(5));
+  if (id.startsWith("beat:")) return inspectBeat(box, +id.slice(5));
+  if (id.startsWith("pace:")) { const b = (tl.beats || [])[+id.slice(5)]; box.innerHTML = b ? `<h3>Rytm na „${esc(b.text)}”</h3><div>Długo bez żadnego zdarzenia i bez rozpoznanego momentu: delikatny najazd tylko dla rytmu. Lepsza decyzja: przytnij ten fragment albo oznacz w nim moment (Ctrl+klik w słowo).</div>` : ""; return; }
   if (id.startsWith("iss:")) { const c = tl.issues.find((x) => `iss:${x.id}` === id); box.innerHTML = c ? `<h3>${esc(c.code)} · ${SEV[c.sev] || esc(c.sev)}</h3><div>${esc(c.msg)}</div>` : ""; return; }
   if (id === "music") { S.sel = null; document.querySelector('[data-tab="t-globals"]').click(); return renderInspector(); }
   box.innerHTML = '<div class="muted">Ten element nie ma ustawień.</div>';
@@ -438,6 +450,60 @@ function inspectEmph(box, pos) {
   if (w && w.out != null) setPlayhead(w.out);
 }
 
+// what build_edl/beatfx did with a moment (edl beat_fx "fx"), in words
+const FX = { punch: "najazd z gramatyki montażu", spacing: "bez najazdu: za blisko silniejszego najazdu",
+  quiet: "bez najazdu: moment poboczny, wokół dzieje się dość", none: "ten typ nie dostaje najazdu (np. wyznanie: emocję niesie twarz)",
+  box: "pod ramką grafiki: grafika jest efektem", gfx: "efektem jest grafika", cut: "słowo wycięte", off: "wyłączony ręcznie",
+  manual: "bez najazdu: zoom tego ujęcia ustawiony ręcznie", unknown: "typu nie ma w gramatyce (style/grammar.json): zmień typ" };
+function inspectBeat(box, pos) {
+  const b = (S.view.timeline.beats || []).find((x) => x.pos === pos), raw = (S.view.plan.beats || [])[pos];
+  if (!b || !raw) { S.sel = null; return renderInspector(); }
+  const types = S.view.beat_types || {}, vertical = !!S.view.plan.vertical;
+  // a type no longer in the grammar stays selected (and is not sent back) until the editor picks another one
+  const opts = (b.type in types ? "" : `<option value="${esc(b.type)}" selected>${esc(b.type)} (spoza gramatyki)</option>`)
+    + Object.entries(types).map(([k, v]) => `<option value="${esc(k)}"${k === b.type ? " selected" : ""}>${esc(v)}</option>`).join("");
+  box.innerHTML = `<h3>Moment: ${esc(b.label)} „${esc(b.text)}” <span class="muted">(${b.src === "manual" ? "ręczny" : b.src === "llm" ? "lokalne AI" : "reguła"})</span></h3>
+  <div class="grid">
+    ${field("Typ", `<select id="btype">${opts}</select>`)}
+    ${field("Wyłącz", '<input type="checkbox" id="boff"' + (b.off ? " checked" : "") + ">")}
+    ${field("Wymuś najazd", '<input type="checkbox" id="bforce"' + (b.force ? " checked" : "") + ">")}
+    ${field("W filmie", b.at != null ? fmt(b.at) : "–")}
+    ${field("Efekt", esc(FX[b.fx] || "kliknij „Sprawdź”"))}
+    ${field("Grafika", esc(b.gfx || "–"))}${vertical ? field("B-roll", esc(b.broll || "–")) : ""}${field("Dźwięk", esc(b.sfx || "–"))}
+  </div>
+  <div class="row"><button id="bsave">Zapisz</button>${b.gfx === "kw" ? '<button id="bgfx" class="ghost">+ grafika z tego momentu</button>' : ""}${b.src === "manual" ? '<button id="bdel" class="ghost">Usuń moment</button>' : ""}</div>
+  <div class="muted">Efekty wynikają z gramatyki montażu (style/grammar.json): ten sam typ momentu = ten sam efekt w każdym filmie. Zmiana typu robi moment ręcznym (ponowne rozpoznanie go nie nadpisze).</div>`;
+  $("boff").onchange = () => { if ($("boff").checked) $("bforce").checked = false; };  // off and forced exclude each other
+  $("bforce").onchange = () => { if ($("bforce").checked) $("boff").checked = false; };
+  $("bsave").onclick = () => editOp({ op: "set_beat", pos, fields: { ...($("btype").value !== b.type ? { type: $("btype").value } : {}), off: $("boff").checked, force: $("bforce").checked } });
+  if ($("bdel")) $("bdel").onclick = async (ev) => {  // removal is by position: a second click must not delete the next moment
+    const btn = ev.currentTarget; btn.disabled = true;
+    try { await editOp({ op: "remove_beat", pos }); } catch { btn.disabled = false; return; }  // error already toasted by api()
+    S.sel = null; renderInspector();
+  };
+  if ($("bgfx")) $("bgfx").onclick = async () => {
+    const text = await ask(`Tekst grafiki dla momentu „${b.text}”`, b.text.replace(/[,.?!]+$/, ""));
+    if (!text) return;
+    const id = `m_${S.film}_${raw.word}`.slice(0, 80);
+    await editOp({ op: "add_gfx", spec: { id, type: "kw", text, dur: 3, ...(vertical ? { canvas: "v" } : {}) }, i: raw.word });
+    select(`gfx:${id}`);
+  };
+  if (b.at != null) setPlayhead(b.at);
+}
+async function addBeat(i) {
+  const types = S.view.beat_types || {}, w = S.view.timeline.words[i];
+  const opts = Object.entries(types).filter(([k]) => k !== "hook").map(([k, v]) => `<option value="${esc(k)}">${esc(v)}</option>`).join("");
+  let type = null;
+  const first = !("beats" in S.view.plan);
+  const warn = first ? '<p class="muted">Pierwszy moment włącza gramatykę montażu dla całego filmu: najazdy tylko z momentów, losowe auto-najazdy znikną (Ctrl+Z cofa).</p>' : "";
+  const ok = await modal(`<h3 id="modaltitle">Moment na „${esc(w.text.trim())}”</h3><label for="nbtype">Typ</label> <select id="nbtype">${opts}</select>${warn}`,
+    [["Dodaj", true], ["Anuluj", false, "ghost"]], "nbtype").then((r) => { type = $("nbtype").value; return r; });  // read before a queued dialog replaces it
+  if (!ok) return;
+  await editOp({ op: "add_beat", i, type });
+  if (first && "beats" in S.view.plan) toast("Gramatyka montażu włączona dla tego filmu: najazdy tylko z momentów (Ctrl+Z cofa)");
+  const pos = (S.view.plan.beats || []).findIndex((b) => b.word === i);
+  if (pos >= 0) select(`beat:${pos}`);
+}
 function segOf(w) { return S.view.timeline.segments.find((s) => s.src_in <= w.src && w.src <= s.src_out); }
 async function icons() { if (!S.icons) S.icons = await api("/api/icons"); return S.icons; }
 function inspectGfx(box, gid) {
@@ -543,6 +609,24 @@ $("fix").onclick = async () => {
     if (await modal(html, [["Zapisz poprawki", true], ["Odrzuć", false, "ghost"]])) {
       const s = await post(`/api/film/${fq()}/fix-apply?job=${j.id}`);
       await loadFilm(); watchJob(s.job, () => loadFilm()); toast("Poprawki zapisane (Ctrl+Z cofa)");
+    }
+  });
+};
+
+$("beats").onclick = async () => {
+  const r = await startJob("beats", `/api/film/${fq()}/beats`);
+  $("log").textContent = "";
+  watchJob(r.job, async (j) => {
+    if (j.status !== "done") return;
+    const m = j.result.summary;
+    const html = `<h3 id="modaltitle">Momenty montażu</h3><div>Rozpoznane z tekstu: <b>${m.beats}</b> (nowe: ${m.new}).
+      Efekty dobierze gramatyka montażu; losowe najazdy z poprawiacza znikną, ręczne zostają.</div>
+      ${m.beats ? "" : '<p class="badge warn">Nie rozpoznano żadnego momentu: po zastosowaniu film zostanie tylko z „rytmem” i ręcznymi najazdami. Zwykle lepiej odrzucić.</p>'}
+      ${m.gfx.length ? `<div>Nowe grafiki z momentów: ${m.gfx.map(esc).join(" · ")}</div>` : ""}
+      <div class="muted">Ręczne decyzje (zmieniony typ, wyłączone, wymuszone) zostają. Ctrl+Z cofa.</div>`;
+    if (await modal(html, [["Zastosuj", true], ["Odrzuć", false, "ghost"]])) {
+      const s = await post(`/api/film/${fq()}/beats-apply?job=${j.id}`);
+      await loadFilm(); watchJob(s.job, () => loadFilm()); toast("Momenty zapisane (Ctrl+Z cofa)");
     }
   });
 };
