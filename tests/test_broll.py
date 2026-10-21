@@ -135,13 +135,16 @@ class ProposeTest(unittest.TestCase):
 
     def test_odd_plan_shapes_do_not_stop_the_proposal(self):
         plan, W, edl = film(f"{FILLER} faktury {FILLER}")
-        plan["broll"] = [{"word": "1"}, {}, {"word": 10**6}, "x"]
+        plan["broll"] = [{"word": "1"}, {}, {"word": 10**6}, "x", {"word": 1, "dur": "x"}, {"word": 2, "dur": -1000},
+                         {"word": 3, "id": [1]}, {"word": 4, "query": ["q"]}, {"word": 5, "provider": {"p": 1}}]
         plan["broll_rejected"] = None
         plan["beats"] = [{"type": "stat", "word": 0}]
         g = grammar()
         del g["broll"]["short"]["avoid"]  # optional in the validator: optional here too
         prop, _ = self.propose(plan, W, edl, g)
-        self.assertEqual([b["said"] for b in prop["broll"]], ["faktury"])
+        self.assertEqual([b["said"] for b in prop["broll"]], ["faktury"])  # a negative dur no longer frees the share limit
+        plan["broll"], plan["broll_rejected"] = [], [{"word": [1], "id": {"a": 1}}, {"word": 2, "provider": "pexels", "id": 7}]
+        self.assertEqual([b["said"] for b in self.propose(plan, W, edl, g)[0]["broll"]], ["faktury"])
 
     def test_long_format_without_config_proposes_nothing(self):
         plan, W, edl = film(f"{FILLER} faktury {FILLER}")

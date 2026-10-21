@@ -306,6 +306,25 @@ class CompatTest(unittest.TestCase):
         self.assertTrue(said and all(said), edl["broll_skipped"])  # the editor sees the spoken word, not its index
         self.assertTrue(any("„" in i["msg"] for i in c11))
 
+    def test_broll_key_of_any_shape_never_stops_the_build(self):
+        self.broll_setup()
+        for odd in (None, 5, "x"):
+            with self.subTest(broll=odd):
+                edl = self.broll_edl(odd, broll_rejected=None)
+                self.assertEqual((edl["broll"], edl["broll_removed"]), ([], 0))
+                self.assertTrue(edl["broll_skipped"])  # the critic (C11) tells the editor
+        r = self.run_script(PIPE, "critic.py", f"plan_{FILM}.json", "--json", str(self.tmp / "c.json"))
+        self.assertIn(r.returncode, (0, 1), r.stderr)
+        c11 = [i["msg"] for i in json.loads((self.tmp / "c.json").read_text())["issues"] if i["code"] == "C11"]
+        self.assertEqual(c11, ["b-roll pominięty: zły klucz broll w planie (nie lista)"])
+        edl = self.broll_edl([], broll_rejected=[{"word": 1, "provider": "pexels", "id": 2}, "junk", 3])
+        self.assertEqual(edl["broll_removed"], 1)  # the ADR-0003 metric counts real removals only
+        r = subprocess.run([sys.executable, str(PIPE / "beatfx.py"), str(self.work / self.plan["edl_out"])], capture_output=True,
+                           text=True, check=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        row = json.loads(r.stdout.split(" ", 3)[3])
+        self.assertEqual((row["broll_clips"], row["broll_share"], row["broll_removed"]), (0, 0.0, 1))
+
     def test_broll_renders_under_graphics_and_captions_without_moving_other_inputs(self):
         kept = self.broll_setup()[2]
         edl = self.broll_edl([{"file": str(self.clip), "dur": 2.5, "word": kept[len(kept) // 2], "query": "q"}])
