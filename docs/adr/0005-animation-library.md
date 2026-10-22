@@ -1,6 +1,6 @@
 # ADR-0005 — Biblioteka animacji do kart: GSAP w obecnym rendererze, nie Remotion ani OpenChatCut
 
-Data: 2026-10-22 | Status: przyjęte (pilot jeszcze nie zbudowany) | Drzwi: dwukierunkowe | Przegląd: 2026-12-01
+Data: 2026-10-22 | Status: przyjęte, pilot zbudowany 2026-10-22 (karta `count`) | Drzwi: dwukierunkowe | Przegląd: 2026-12-01
 
 **Kontekst:** Kamil (2026-10-22) widział reklamy „AI edytuje wideo z motion graphics” i pyta, na ile nasz system jest dopracowany. Mamy 7 typów kart (kw, list, lower, slide, chap, cta, end). `gfx/render.mjs` składa je w HTML+CSS. Renderuje je Chromium z Playwrighta klatka po klatce: zatrzymuje animacje (`document.getAnimations()`), ustawia `currentTime`, robi zrzut i składa ProRes 4444 z alfą. Animacje to proste wjazdy CSS. Brakuje animowanej typografii, liczników „0 → 95%”, wykresów rysowanych w czasie i przejść.
 
@@ -38,3 +38,10 @@ D (Lottie) zostaje jako drugi krok na animowane ikony, gdy pilot GSAP się spraw
 - Nowy typ karty to nowy klucz w `gfx_specs`. Stare specyfikacje renderują się bez zmian, bo strażnik `tests/test_pipeline_compat.py` w panelu dostaje test karty `count`.
 - Wyłącznik: bez kart `count` GSAP nie jest ładowany do strony.
 - Rollback = usunięcie typu karty i zależności.
+
+**Pilot (2026-10-22):** karta `count` = ramka `kw`, w której każda liczba z `text` odlicza od 0 („95%”, „2,5 dnia”, „12 000 zł”, „50–70%”).
+Nie ma nowych pól, więc panel edytuje ją jak `kw`. Jedyna reguła: tekst musi zawierać liczbę.
+- Kod: `gfx/count_lib.mjs` (liczby i format PL), `gfx/render.mjs` (GSAP `gsap@3.15.0`, wersja przypięta, ładowany tylko na stronę karty `count`; zatrzymana oś czasu, `seek(t)` na każdej klatce).
+- Bezpieczeństwo: `npm | GreenSock/Webflow | podpis rejestru + atestacja (npm audit signatures), brak skryptów install | JS tylko w stronie karty w Chrome | OK`.
+- Determinizm: `gfx/test/count.test.mjs` renderuje kartę dwa razy i wymaga identycznych klatek (`framemd5`). Uwaga: karty z ikoną (`kw` i `count`) już wcześniej nie były identyczne bit w bit w klatkach 1–12, kiedy ikona wskakuje z obrotem (wygładzanie krawędzi SVG). To istniało przed pilotem i oka to nie razi.
+- Ramka i dźwięk jak `kw`: `gfx_types.SIDE_BOX`, `timeline.BOX_TYPES`, „pop” w `music/make_beds.py`.

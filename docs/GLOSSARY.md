@@ -14,7 +14,7 @@ Jedna nazwa na pojęcie. Pierwsza kolumna = UI i dokumentacja (PL), druga = kod 
 | najazd | `emph`, punch-in | szybki zoom na słowie (`amt` = siła, `speed` = czas w s) |
 | ręczny zoom | `seg_zoom` | zoom ujęcia ustawiony w panelu; klucz = wejście ujęcia w źródle (2 miejsca po przecinku) |
 | bezpieczny limit | `zmax` | największy zoom, przy którym głowa zostaje w kadrze (liczy `face_track.py`); panel i pipeline nie pozwalają wyżej |
-| grafika | overlay, `gfx`, `gfx_specs.json` | plansza HTML wyrenderowana do `.mov` (`gfx/render.mjs`); `kw`, `list`, `lower`, `chap`, `cta`, `slide`, `end` |
+| grafika | overlay, `gfx`, `gfx_specs.json` | plansza HTML wyrenderowana do `.mov` (`gfx/render.mjs`); `kw`, `count` (licznik: liczby z tekstu odliczane od 0, GSAP), `list`, `lower`, `chap`, `cta`, `slide`, `end`, `web` |
 | przesunięcie grafiki | `lead` | sekundy od słowa-zaczepu do startu grafiki |
 | krytyk | `critic.py`, C1–C11 | reguły jakości (C1 brak wydarzenia wizualnego, C3 short bez zmiany obrazu, C6 ekran końcowy, C9 liczby bez źródła, C10 gramatyka montażu, C11 b-roll z planu, którego nie dało się ułożyć…) |
 | akceptuję | `critic_accept` | świadomy wyjątek od uwagi krytyka, z powodem |
@@ -27,7 +27,7 @@ Jedna nazwa na pojęcie. Pierwsza kolumna = UI i dokumentacja (PL), druga = kod 
 | zadanie | job (`jobs.py`) | przeliczenie, sprawdzenie, podgląd, poprawki albo render w kolejce panelu (jedno naraz) |
 | znacznik | playhead | pionowa linia na osi; podgląd ±10 s i nowa grafika liczą się od niego |
 | zaczep (słowo-zaczep) | `word` / `find`+`near` w `gfx`, `emph` | słowo transkrypcji, do którego przyczepiona jest grafika albo najazd; po cięciach jedzie razem z nim |
-| ramka | box (`kw`, `list`, `slide`) | grafika z boku kadru; pod nią `build_edl.py` trzyma zoom 1.0 (C2 „zoom pod ramką”) |
+| ramka | box (`kw`, `count`, `list`, `slide`, `web`) | grafika z boku kadru; pod nią `build_edl.py` trzyma zoom 1.0 (C2 „zoom pod ramką”) |
 | render spoza panelu | foreign render | `run_v4.sh` dla tego projektu uruchomiony z terminala/zadania; panel wtedy nie zapisuje i nie przelicza |
 | moment (montażu) | beat, `beats` | miejsce w tekście nagrania z intencją (hak, liczba, kontrast, puenta, lista, pytanie, wyznanie…), wykryte z treści (`beats.py`); efekt wynika z typu momentu, nie z czasu |
 | gramatyka montażu | `style/grammar.json` | jedna tabela: typ momentu -> efekt (najazd, grafika, SFX, b-roll) osobno dla long i short + progi (`min_gap`, `fill_after`, `max_static`); uzasadnienia w `style/RESEARCH.md` |

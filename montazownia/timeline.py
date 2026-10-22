@@ -11,7 +11,7 @@ from typing import Any
 
 from .planops import EMPH_WINDOW, GFX_WINDOW, kept_indices, resolve
 
-BOX_TYPES = ("kw", "list", "slide", "web")  # = gfx_types.SIDE_BOX  # side boxes: build_edl keeps zoom at 1.0 under them
+BOX_TYPES = ("kw", "count", "list", "slide", "web")  # = gfx_types.SIDE_BOX  # side boxes: build_edl keeps zoom at 1.0 under them
 
 
 def src2out(segments: list[dict], t: float) -> float:
@@ -79,7 +79,7 @@ def sfx_events(edl: dict, specs: dict[str, dict]) -> list[dict]:
     ev = []
     for o in edl.get("overlays", []):
         sp = specs.get(o["id"], {}); ty = sp.get("type")
-        if ty in ("kw", "lower"):
+        if ty in ("kw", "count", "lower"):
             ev.append((o["at"] + 0.03, "pop"))
         if ty == "list":
             ev.append((o["at"], "whoosh"))

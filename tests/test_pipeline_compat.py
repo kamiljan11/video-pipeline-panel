@@ -172,6 +172,15 @@ class CompatTest(unittest.TestCase):
         self.assertEqual([(o["id"], o["pip"]) for o in edl["overlays"]], [("w1", True)])
         self.assertFalse([i for i in issues if i["code"] == "C2" and "w1" in i["msg"] and i["sev"] == "error"], issues)
 
+    def test_count_card_is_a_side_box_like_kw(self):
+        # a 16:9 count card covers the face side like kw: build_edl skips an emphasis punch-in under it (gfx_types.SIDE_BOX)
+        for ty, skipped in (("kw", True), ("count", True), ("lower", False)):
+            with self.subTest(type=ty):
+                (self.work / "specs.json").write_text(json.dumps([{"id": "c1", "type": ty, "text": "95%", "sub": "firm", "dur": 3.0}]))
+                self.write_plan({**self.plan, "gfx_specs": "specs.json", "gfx_dir": str(self.work / "gfx"),
+                                 "gfx": [{"id": "c1", "word": 1151, "lead": 0.0}], "emph": [{"word": 1152}]})
+                self.assertEqual("emph skipped (box on screen)" in self.edl_from(PIPE)[1], skipped)
+
     def test_critic_vertical_card_under_the_hook_title_is_an_error(self):
         specs = [{"id": "early", "type": "kw", "text": "Start", "sub": "", "dur": 2.0, "icon": "hash", "canvas": "v"}]
         issues = self.critic_issues(specs, [{"id": "early", "word": 1145, "lead": 0.0}])  # hook_text shows for 3 s

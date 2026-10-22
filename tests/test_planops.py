@@ -145,6 +145,12 @@ class SpecSchemaTest(unittest.TestCase):
                                 "icons": ["bell", ""], "delays": [0.2, 0.6]})
         self.assertNotIn("text", po.update_spec([{"id": "b", "type": "end", "dur": 4}], "b", {"sub": "x"})[0])
 
+    def test_count_card_needs_a_number_in_its_text(self):
+        self.assertEqual(po.update_spec([SPEC], "a", {"type": "count", "text": "2,5 dnia"})[0]["type"], "count")
+        for text in ("bez liczby", "", "\u0663 dni"):  # a non-ASCII digit: gfx/render.mjs would not count it
+            with self.subTest(text=text), self.assertRaises(EditError):
+                po.update_spec([SPEC], "a", {"type": "count", "text": text})
+
 
     def test_web_card_fields(self):
         web = {"type": "web", "url": "https://example.org/raport", "find": "95 procent firm nie widzi zwrotu"}

@@ -535,7 +535,7 @@ function inspectGfx(box, gid) {
   const ov = S.view.timeline.overlays.find((o) => o.id === gid);
   if (!spec) { box.innerHTML = `<div class="muted">Brak opisu grafiki ${esc(gid)} w gfx_specs.</div>`; return; }
   const w = S.view.timeline.words.find((x) => x.gfx.includes(gid));
-  const types = ["kw", "list", "lower", "chap", "cta", "slide", "end", "web"];
+  const types = ["kw", "count", "list", "lower", "chap", "cta", "slide", "end", "web"];
   box.innerHTML = `<h3>Grafika ${esc(gid)} <span class="muted">${ov ? fmt(ov.start) + "–" + fmt(ov.end) : "poza filmem"}</span></h3>
   <div class="grid">
     ${field("Typ", `<select id="gtype">${types.map((t) => `<option${t === spec.type ? " selected" : ""}>${t}</option>`).join("")}</select>`)}

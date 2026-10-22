@@ -20,7 +20,7 @@ Specs = list[dict[str, Any]]
 # build_edl.py searches find+near anchors in these windows (gfx: +-25 words, emph: +-30 words)
 GFX_WINDOW, EMPH_WINDOW = 25, 30
 NO_FACE_LIMIT = 2.0  # face_track sets no zmax when it found no face in a shot: no head to keep in frame (UI says so)
-SPEC_TYPES = ("kw", "list", "lower", "chap", "cta", "slide", "end", "web")
+SPEC_TYPES = ("kw", "count", "list", "lower", "chap", "cta", "slide", "end", "web")
 SPEC_FIELDS = {"text", "sub", "icon", "icons", "items", "delays", "type", "dur", "html", "src",
                "canvas", "quote", "beat",  # cards of the editing grammar (beats.py)
                "url", "find", "img", "box", "page"}  # "web": the cited page (gfx/webshot.mjs)
@@ -499,6 +499,9 @@ def _clean_spec(s: dict) -> dict:
         if s["type"] == "list" and not items:
             raise EditError("lista: dodaj co najmniej jeden punkt")
         out["items"] = [_str(x, "punkt listy") for x in items]
+    title = out.get("text")
+    if s["type"] == "count" and not (isinstance(title, str) and re.search(r"[0-9]", title)):
+        raise EditError("licznik: tekst z liczbą, np. „95%” albo „2,5 dnia” (liczy od 0 do tej liczby)")
     return out
 
 

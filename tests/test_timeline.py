@@ -40,6 +40,11 @@ class TimelineTest(unittest.TestCase):
         self.assertIn((2.7, "whoosh"), [(round(e["t"], 3), e["kind"]) for e in timeline.sfx_events(edl, specs)])
         self.assertEqual(timeline.overlays_view(edl, specs)[0]["text"], "zdanie ze strony")
 
+    def test_count_card_pops_like_kw(self):
+        edl = {**EDL, "overlays": [{"id": "c", "at": 3.0, "dur": 4.0}]}
+        ev = [(round(e["t"], 3), e["kind"]) for e in timeline.sfx_events(edl, {"c": {"id": "c", "type": "count", "text": "95%"}})]
+        self.assertIn((3.03, "pop"), ev)  # the other events come from the EDL's zoom ramps
+
     def test_sfx_follow_graphics_and_ramps(self):
         ev = [(e["t"], e["kind"]) for e in timeline.sfx_events(EDL, SPECS)]
         self.assertEqual(ev, [(2.03, "pop"), (4.95, "whoosh"), (6.0, "whoosh"), (6.55, "pop"), (7.05, "pop")])
