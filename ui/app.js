@@ -454,7 +454,7 @@ function inspectEmph(box, pos) {
   </div>
   ${w && w.emph_live === false ? `<p class="badge warn">Tego najazdu nie widać w filmie: ujęcie ma bezpieczny limit zoomu ${esc(segOf(w)?.zmax ?? "?")} (głowa wyszłaby z kadru), obok jest ramka grafiki albo słowo jest na samym początku ujęcia. Ruch można ustawić ręcznie w ujęciu: „Zoom start” niżej niż limit.</p>` : ""}
   <div class="row"><button id="esave">Zapisz</button><button id="edel" class="ghost">Usuń najazd</button></div>
-  <div class="muted">Najazd nie zadziała pod ramką grafiki (kw/list/slide); build_edl go wtedy pomija. Limit zoomu ujęcia i tak go przytnie.</div>`;
+  <div class="muted">Najazd nie zadziała pod ramką grafiki (kw/count/list/slide/web); build_edl go wtedy pomija. Limit zoomu ujęcia i tak go przytnie.</div>`;
   $("esave").onclick = () => editOp({ op: "update_emph", pos, amt: +$("eamt").value, speed: +$("espeed").value });
   $("edel").onclick = async () => { await editOp({ op: "remove_emph", pos }); S.sel = null; renderInspector(); };
   if (w && w.out != null) setPlayhead(w.out);
@@ -538,7 +538,7 @@ function inspectGfx(box, gid) {
   const types = ["kw", "count", "list", "lower", "chap", "cta", "slide", "end", "web"];
   box.innerHTML = `<h3>Grafika ${esc(gid)} <span class="muted">${ov ? fmt(ov.start) + "–" + fmt(ov.end) : "poza filmem"}</span></h3>
   <div class="grid">
-    ${field("Typ", `<select id="gtype">${types.map((t) => `<option${t === spec.type ? " selected" : ""}>${t}</option>`).join("")}</select>`)}
+    ${field("Typ", `<select id="gtype">${types.map((t) => `<option value="${t}"${t === spec.type ? " selected" : ""}>${t === "count" ? "count (licznik: liczba z tekstu odlicza od 0)" : t}</option>`).join("")}</select>`)}
     ${field("Tekst", `<input id="gtext" style="width:100%" value="${esc(spec.text)}">`)}
     ${field("Podtytuł", `<input id="gsub" style="width:100%" value="${esc(spec.sub)}">`)}
     ${spec.type === "list" ? field("Punkty (1 na linię)", `<textarea id="gitems">${esc((spec.items || []).join("\n"))}</textarea>`) : ""}

@@ -2,7 +2,7 @@
 
 Data: 2026-10-22 | Status: przyjęte, pilot zbudowany 2026-10-22 (karta `count`) | Drzwi: dwukierunkowe | Przegląd: 2026-12-01
 
-**Kontekst:** Kamil (2026-10-22) widział reklamy „AI edytuje wideo z motion graphics” i pyta, na ile nasz system jest dopracowany. Mamy 7 typów kart (kw, list, lower, slide, chap, cta, end). `gfx/render.mjs` składa je w HTML+CSS. Renderuje je Chromium z Playwrighta klatka po klatce: zatrzymuje animacje (`document.getAnimations()`), ustawia `currentTime`, robi zrzut i składa ProRes 4444 z alfą. Animacje to proste wjazdy CSS. Brakuje animowanej typografii, liczników „0 → 95%”, wykresów rysowanych w czasie i przejść.
+**Kontekst** (stan przed pilotem; dziś 9 typów z `web` i `count`)**:** Kamil (2026-10-22) widział reklamy „AI edytuje wideo z motion graphics” i pyta, na ile nasz system jest dopracowany. Mamy 7 typów kart (kw, list, lower, slide, chap, cta, end). `gfx/render.mjs` składa je w HTML+CSS. Renderuje je Chromium z Playwrighta klatka po klatce: zatrzymuje animacje (`document.getAnimations()`), ustawia `currentTime`, robi zrzut i składa ProRes 4444 z alfą. Animacje to proste wjazdy CSS. Brakuje animowanej typografii, liczników „0 → 95%”, wykresów rysowanych w czasie i przejść.
 
 **Kryteria:**
 1. Licencja pozwala na filmy firmowe na YouTube.
@@ -45,3 +45,8 @@ Nie ma nowych pól, więc panel edytuje ją jak `kw`. Jedyna reguła: tekst musi
 - Bezpieczeństwo: `npm | GreenSock/Webflow | podpis rejestru + atestacja (npm audit signatures), brak skryptów install | JS tylko w stronie karty w Chrome | OK`.
 - Determinizm: `gfx/test/count.test.mjs` renderuje kartę dwa razy i wymaga identycznych klatek (`framemd5`). Uwaga: karty z ikoną (`kw` i `count`) już wcześniej nie były identyczne bit w bit w klatkach 1–12, kiedy ikona wskakuje z obrotem (wygładzanie krawędzi SVG). To istniało przed pilotem i oka to nie razi.
 - Ramka i dźwięk jak `kw`: `gfx_types.SIDE_BOX`, `timeline.BOX_TYPES`, „pop” w `music/make_beds.py`.
+- ADR po stronie pipeline'u (tam leży zależność): `../docs/adr/0003-gsap-count-card.md`.
+
+**Koszt cykliczny:** 0 zł (licencja „no charge”, bez kont). Wersja przypięta; aktualizacja tylko ręcznie z nową linią bezpieczeństwa i `npm test`.
+
+**Kryterium przeglądu (2026-12-01):** pilot zostaje, gdy `count` trafił do co najmniej jednego opublikowanego filmu bez `FAILED` w `gfx.log`. Bez użycia: podpiąć do gramatyki montażu (momenty „liczba” dają dziś `kw`) albo wycofać. Wycofanie bez utraty kart: w `gfx_specs.json` `"type": "count"` -> `"kw"`, potem usunąć typ z `SPEC_TYPES`/`BOX_TYPES` i paczkę.

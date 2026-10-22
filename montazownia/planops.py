@@ -499,10 +499,20 @@ def _clean_spec(s: dict) -> dict:
         if s["type"] == "list" and not items:
             raise EditError("lista: dodaj co najmniej jeden punkt")
         out["items"] = [_str(x, "punkt listy") for x in items]
-    title = out.get("text")
-    if s["type"] == "count" and not (isinstance(title, str) and re.search(r"[0-9]", title)):
-        raise EditError("licznik: tekst z liczbą, np. „95%” albo „2,5 dnia” (liczy od 0 do tej liczby)")
+    if s["type"] == "count" and not counts_something(out.get("text")):
+        raise EditError("licznik: tekst z liczbą do odliczania, np. „95%” albo „2,5 dnia” (jeden tekst, nie lista; "
+                        "nie liczy „B2B”, „Q3”, „15:30”, „10.5”, „007”)")
     return out
+
+
+# = NUM in ../gfx/count_lib.mjs (the renderer): a number standing alone, not in a word/code, a time, a dotted number;
+# tests/test_planops.py checks both rules give the same answer
+COUNT_NUM = re.compile(r"(?<![^\W\d_])(?<![0-9.:,])(?:[0-9]{1,3}(?:[ \u00a0][0-9]{3})+(?![0-9])|[0-9]+)(?:,[0-9]+)?(?![0-9.:]|,[0-9])")
+
+
+def counts_something(text: Any) -> bool:
+    """A "count" card needs at least one number the renderer counts up (a leading zero "007" is a code, not an amount)."""
+    return isinstance(text, str) and any(not re.match(r"0[0-9]", m.group()) for m in COUNT_NUM.finditer(text))
 
 
 WEB_TEXT = ("url", "find", "img")

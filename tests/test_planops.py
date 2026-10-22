@@ -1,4 +1,8 @@
+import json
+import shutil
+import subprocess
 import unittest
+from pathlib import Path
 
 from montazownia import planops as po
 from montazownia.planops import EditError
@@ -147,7 +151,7 @@ class SpecSchemaTest(unittest.TestCase):
 
     def test_count_card_needs_a_number_in_its_text(self):
         self.assertEqual(po.update_spec([SPEC], "a", {"type": "count", "text": "2,5 dnia"})[0]["type"], "count")
-        for text in ("bez liczby", "", "\u0663 dni"):  # a non-ASCII digit: gfx/render.mjs would not count it
+        for text in ("bez liczby", "", "\u0663 dni", "B2B", "Q3", "15:30", "10.5", "kod 007"):  # nothing the renderer counts
             with self.subTest(text=text), self.assertRaises(EditError):
                 po.update_spec([SPEC], "a", {"type": "count", "text": text})
 
@@ -224,3 +228,16 @@ class BeatsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(shutil.which("node"), "no node")
+class CountRuleMatchesRendererTest(unittest.TestCase):
+    """The panel's "count needs a number" must say what gfx/count_lib.mjs (the renderer) counts, or a saved card renders as kw."""
+
+    def test_same_answer_as_count_lib(self):
+        texts = ["95%", "2,5 dnia", "12 000 zł", "50–70%", "-5%", "Q3 2025", "5 h", "B2B", "Q3", "v2.0", "15:30", "10.5",
+                 "kod 007", "00", "bez liczby", "\u0663 dni", "od 2 1000 zł", "1,05 zł"]
+        lib = Path(__file__).resolve().parents[2] / "gfx" / "count_lib.mjs"
+        js = f"import('{lib.as_uri()}').then(m => console.log(JSON.stringify(JSON.parse(process.argv[1]).map(m.hasNumber))))"
+        r = subprocess.run(["node", "-e", js, json.dumps(texts)], capture_output=True, text=True, timeout=30, check=True)
+        self.assertEqual(json.loads(r.stdout), [po.counts_something(t) for t in texts])
