@@ -11,7 +11,7 @@ from typing import Any
 
 from .planops import EMPH_WINDOW, GFX_WINDOW, kept_indices, resolve
 
-BOX_TYPES = ("kw", "list", "slide")  # side boxes: build_edl keeps zoom at 1.0 under them
+BOX_TYPES = ("kw", "list", "slide", "web")  # = gfx_types.SIDE_BOX  # side boxes: build_edl keeps zoom at 1.0 under them
 
 
 def src2out(segments: list[dict], t: float) -> float:
@@ -49,7 +49,7 @@ def overlays_view(edl: dict, specs: dict[str, dict]) -> list[dict]:
     for o in edl.get("overlays", []):
         sp = specs.get(o["id"], {})
         res.append({"id": o["id"], "start": o["at"], "end": round(o["at"] + o["dur"], 3), "type": sp.get("type"),
-                    "pip": bool(o.get("pip")), "text": sp.get("text") or sp.get("items") or o["id"]})
+                    "pip": bool(o.get("pip")), "text": sp.get("text") or sp.get("find") or sp.get("items") or o["id"]})
     return res
 
 
@@ -84,7 +84,7 @@ def sfx_events(edl: dict, specs: dict[str, dict]) -> list[dict]:
         if ty == "list":
             ev.append((o["at"], "whoosh"))
             ev += [(o["at"] + dl + 0.05, "pop") for dl in sp.get("delays", [])]
-        if ty in ("chap", "slide", "end"):
+        if ty in ("chap", "slide", "web", "end"):  # = music/make_beds.py
             ev.append((o["at"] - 0.3, "whoosh"))
         if ty == "cta":
             ev.append((o["at"] + 0.1, "ding"))

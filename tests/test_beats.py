@@ -21,7 +21,10 @@ PIPE = Path(__file__).resolve().parents[2]
 
 
 def _load(name: str) -> Any:
-    """The pipeline modules are scripts next to the panel, not a package: load them by path."""
+    """The pipeline modules are scripts next to the panel, not a package: load them by path. Their folder goes on
+    sys.path as when they run as scripts, so their own imports of each other (beatfx -> gfx_types) resolve."""
+    if str(PIPE) not in sys.path:
+        sys.path.append(str(PIPE))
     spec = importlib.util.spec_from_file_location(name, PIPE / f"{name}.py")
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)

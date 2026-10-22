@@ -34,6 +34,12 @@ class TimelineTest(unittest.TestCase):
         self.assertEqual([(w["emph"], w["emph_live"], w["out"]) for w in view], [(0, False, 1.0), (1, True, 5.0)])
         self.assertIsNone(timeline.words_view(plan, words, None)[0]["emph_live"])
 
+    def test_web_card_whooshes_and_shows_its_quote(self):
+        edl = {**EDL, "overlays": [{"id": "w", "at": 3.0, "dur": 6.0, "pip": True}]}
+        specs = {"w": {"id": "w", "type": "web", "url": "https://example.org/", "find": "zdanie ze strony"}}
+        self.assertIn((2.7, "whoosh"), [(round(e["t"], 3), e["kind"]) for e in timeline.sfx_events(edl, specs)])
+        self.assertEqual(timeline.overlays_view(edl, specs)[0]["text"], "zdanie ze strony")
+
     def test_sfx_follow_graphics_and_ramps(self):
         ev = [(e["t"], e["kind"]) for e in timeline.sfx_events(EDL, SPECS)]
         self.assertEqual(ev, [(2.03, "pop"), (4.95, "whoosh"), (6.0, "whoosh"), (6.55, "pop"), (7.05, "pop")])

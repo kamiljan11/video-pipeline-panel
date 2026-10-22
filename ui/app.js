@@ -159,7 +159,7 @@ function buildItems(tl) {
       className: `k-${s.kind}${s.override ? " k-override" : ""}`, title: `ujęcie ${s.i + 1}: ${fmt(s.start)}–${fmt(s.end)}, zoom ${zoomText(s.zoom)}, limit ${s.zmax ?? "?"}` });
   }
   for (const o of tl.overlays) {
-    const slide = o.type === "slide";
+    const slide = o.pip || o.type === "slide";  // full-screen cards (slide, web page) get their own lane
     it.push({ id: `gfx:${o.id}`, group: slide ? "v3" : "v2", start: T(o.start), end: T(o.end), editable: { updateTime: true },
       content: esc(`${o.id} · ${Array.isArray(o.text) ? o.text[0] : o.text}`), className: slide ? "g-slide" : "g-gfx",
       title: esc(`${o.type}: ${Array.isArray(o.text) ? o.text.join(" / ") : o.text}${o.pip ? " (z PiP)" : ""}`) });
@@ -535,13 +535,18 @@ function inspectGfx(box, gid) {
   const ov = S.view.timeline.overlays.find((o) => o.id === gid);
   if (!spec) { box.innerHTML = `<div class="muted">Brak opisu grafiki ${esc(gid)} w gfx_specs.</div>`; return; }
   const w = S.view.timeline.words.find((x) => x.gfx.includes(gid));
-  const types = ["kw", "list", "lower", "chap", "cta", "slide", "end"];
+  const types = ["kw", "list", "lower", "chap", "cta", "slide", "end", "web"];
   box.innerHTML = `<h3>Grafika ${esc(gid)} <span class="muted">${ov ? fmt(ov.start) + "–" + fmt(ov.end) : "poza filmem"}</span></h3>
   <div class="grid">
     ${field("Typ", `<select id="gtype">${types.map((t) => `<option${t === spec.type ? " selected" : ""}>${t}</option>`).join("")}</select>`)}
     ${field("Tekst", `<input id="gtext" style="width:100%" value="${esc(spec.text)}">`)}
     ${field("Podtytuł", `<input id="gsub" style="width:100%" value="${esc(spec.sub)}">`)}
     ${spec.type === "list" ? field("Punkty (1 na linię)", `<textarea id="gitems">${esc((spec.items || []).join("\n"))}</textarea>`) : ""}
+    <div id="gweb" style="display:${spec.type === "web" ? "contents" : "none"}">
+      ${field("Adres strony (https://)", `<input id="gurl" style="width:100%" value="${esc(spec.url)}">`)}
+      ${field("Zdanie ze strony (zostanie zaznaczone)", `<textarea id="gfind" style="min-height:60px">${esc(spec.find)}</textarea>`)}
+      ${field("Podpis źródła (puste = domena i tytuł)", `<input id="gsrc" style="width:100%" value="${esc(spec.src)}">`)}
+    </div>
     ${spec.type === "slide" ? field("HTML slajdu", `<textarea id="ghtml" style="min-height:90px">${esc(spec.html)}</textarea>`) : ""}
     ${field("Długość (s)", num("gdur", spec.dur, 0.1, 'min="0.5" max="60"'))}
     ${field("Start na słowie", w ? `„${esc(w.text.trim())}” <span class="muted">(Shift+klik w tekście = przenieś)</span>` : '<span class="muted">nie znaleziono w tekście (Shift+klik słowa)</span>')}
@@ -559,11 +564,13 @@ function inspectGfx(box, gid) {
   $("gicon").oninput = () => { prev(); list(); };
   $("giconlist").onclick = (e) => { const b = e.target.closest("button"); if (b) { $("gicon").value = b.dataset.n; prev(); list(); } };
   prev(); list();
+  $("gtype").onchange = () => { $("gweb").style.display = $("gtype").value === "web" ? "contents" : "none"; };
   $("gsave").onclick = async () => {
     const fields = { type: $("gtype").value, text: $("gtext").value, sub: $("gsub").value, dur: +$("gdur").value, icon: $("gicon").value.trim() || undefined };
     if (!fields.sub && spec.sub == null) delete fields.sub;  // an empty field must not count as a change (the graphic would render again)
     if ($("gitems")) fields.items = $("gitems").value.split("\n").map((x) => x.trim()).filter(Boolean);
     if ($("ghtml")) fields.html = $("ghtml").value;
+    if (fields.type === "web") { fields.url = $("gurl").value.trim(); fields.find = $("gfind").value.trim(); if ($("gsrc").value.trim() || spec.src != null) fields.src = $("gsrc").value.trim(); }
     if (!fields.icon) delete fields.icon;
     const lead = +$("glead").value;  // read now: the first save redraws the inspector
     await editOp({ op: "update_spec", id: gid, fields });

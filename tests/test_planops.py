@@ -146,6 +146,20 @@ class SpecSchemaTest(unittest.TestCase):
         self.assertNotIn("text", po.update_spec([{"id": "b", "type": "end", "dur": 4}], "b", {"sub": "x"})[0])
 
 
+    def test_web_card_fields(self):
+        web = {"type": "web", "url": "https://example.org/raport", "find": "95 procent firm nie widzi zwrotu"}
+        s = po.update_spec([SPEC], "a", {**web, "page": 3, "src": "Źródło: MIT"})[0]
+        self.assertEqual((s["type"], s["url"], s["page"], s["src"]), ("web", web["url"], 3, "Źródło: MIT"))
+        self.assertEqual(po.update_spec([SPEC], "a", {"type": "web", "img": "zrzut.png", "box": [10, 20, 300, 40]})[0]["box"],
+                         [10.0, 20.0, 300.0, 40.0])
+        for bad in ({"type": "web"}, {**web, "url": "http://example.org/"}, {**web, "url": "file:///etc/passwd"},
+                    {**web, "find": "za mało"}, {**web, "find": 5}, {"type": "web", "img": "../sekret.png"},
+                    {"type": "web", "img": "a/b.png"}, {"type": "web", "img": ".ukryty.png"}, {**web, "page": 0},
+                    {**web, "box": [1, 2, 3]}, {**web, "url": "https://x.pl/" + "a" * 2000}):
+            with self.subTest(bad=bad), self.assertRaises(EditError):
+                po.update_spec([SPEC], "a", bad)
+
+
 class BeatsTest(unittest.TestCase):
     TYPES = ("hook", "stat", "contrast", "maxim")
 

@@ -20,9 +20,10 @@ Specs = list[dict[str, Any]]
 # build_edl.py searches find+near anchors in these windows (gfx: +-25 words, emph: +-30 words)
 GFX_WINDOW, EMPH_WINDOW = 25, 30
 NO_FACE_LIMIT = 2.0  # face_track sets no zmax when it found no face in a shot: no head to keep in frame (UI says so)
-SPEC_TYPES = ("kw", "list", "lower", "chap", "cta", "slide", "end")
+SPEC_TYPES = ("kw", "list", "lower", "chap", "cta", "slide", "end", "web")
 SPEC_FIELDS = {"text", "sub", "icon", "icons", "items", "delays", "type", "dur", "html", "src",
-               "canvas", "quote", "beat"}  # the last three: cards of the editing grammar (beats.py)
+               "canvas", "quote", "beat",  # cards of the editing grammar (beats.py)
+               "url", "find", "img", "box", "page"}  # "web": the cited page (gfx/webshot.mjs)
 
 
 class EditError(ValueError):
@@ -488,11 +489,37 @@ def _clean_spec(s: dict) -> dict:
         out["quote"] = bool(s["quote"])
     if "delays" in s:
         out["delays"] = [_bounded(x, 0, 60, "opóźnienia") for x in _list(s["delays"], "opóźnienia")]
+    out.update(_web_fields(s))
     if s["type"] == "list" or "items" in s:
         items = _list(s.get("items"), "punkty listy")
         if s["type"] == "list" and not items:
             raise EditError("lista: dodaj co najmniej jeden punkt")
         out["items"] = [_str(x, "punkt listy") for x in items]
+    return out
+
+
+def _web_fields(s: dict) -> dict:
+    """Fields of a "web" card, checked as gfx/webshot.mjs uses them (it checks the address again before opening it)."""
+    out: dict = {}
+    if "url" in s:
+        out["url"] = _str(s["url"], "adres strony", 2000)
+        if not out["url"].startswith("https://"):
+            raise EditError("adres strony: tylko https://")
+    if "find" in s:
+        out["find"] = _str(s["find"], "zdanie do zaznaczenia")
+    if "img" in s:
+        out["img"] = _str(s["img"], "własny zrzut", 200)
+        if not out["img"] or out["img"].startswith(".") or "/" in out["img"] or "\\" in out["img"]:
+            raise EditError("własny zrzut: nazwa pliku z katalogu projektu (bez ścieżki)")
+    if "page" in s:
+        out["page"] = int(_bounded(s["page"], 1, 5000, "strona PDF"))
+    if "box" in s:
+        box = _list(s["box"], "ramka zaznaczenia")
+        if len(box) != 4:
+            raise EditError("ramka zaznaczenia: [x, y, szerokość, wysokość]")
+        out["box"] = [_bounded(x, 0, 100000, "ramka zaznaczenia") for x in box]
+    if s.get("type") == "web" and not out.get("img") and not (out.get("url") and len(re.sub(r"[\W_]", "", out.get("find", ""))) >= 8):
+        raise EditError("karta strony: adres https:// i zdanie ze strony (min. 8 liter), albo własny zrzut")
     return out
 
 

@@ -42,6 +42,10 @@ Jedna nazwa na pojęcie. Pierwsza kolumna = UI i dokumentacja (PL), druga = kod 
 | lista tematów | `broll.topics` w `style/grammar.json` | pary [regex na jednym słowie, angielskie hasło do stocku]; nowy temat = nowa para, bez kodu |
 | karta pionowa | `canvas: "v"` | grafika shortu w górnym pasie kadru 9:16 (np. karta liczby z momentu „liczba”) |
 
+**Karta `web` (karta źródła)** — grafika z przytaczaną stroną albo PDF-em: okno przeglądarki przewija się do zdania `find` i je
+zaznacza; zrzut robi `gfx/webshot.mjs` raz (`work/gfx/web/`), podpis podaje datę zrzutu. Nie jest momentem gramatyki — projektowana
+ręcznie jak `slide` (ADR-0004).
+
 ## Jak dodać nowy typ momentu
 
 1. `style/grammar.json` › `beats.<typ>`: `label` (UI), `priority` (liczba; wyższy wygrywa przy `min_gap`), `tier` (`primary`/`secondary`), `intent` (zdanie dla lokalnego AI), `cues` (regexy po polsku).
