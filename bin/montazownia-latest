@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
 # Desktop icon "Montażownia": the editing panel on the newest project with a plan (render/montaz/<date>/work, ~/Videos/Montaz).
-# Already running -> only opens the page. Runs in a terminal window: closing it stops the panel and its jobs.
+# Already running -> opens the page (and says so when it runs on an older project). Runs in a terminal window:
+# closing it stops the panel and its jobs.
 set -u
 URL=http://127.0.0.1:8790
-if curl -s -o /dev/null -m 2 "$URL/"; then
-  xdg-open "$URL" >/dev/null 2>&1
-  exit 0
-fi
 WORK=$(for d in "$HOME"/video-pipeline/render/montaz/*/work "$HOME"/Videos/Montaz/*/work; do
   compgen -G "$d/plan_*.json" >/dev/null && printf '%s\t%s\n' "$(basename "$(dirname "$d")")" "$d"
 done | sort | tail -n 1 | cut -f2)
+# the panel answers only its own origin (server.py local_only), so send it
+RUNNING=$(curl -sf -m 2 -H "Origin: $URL" -H "Sec-Fetch-Site: same-origin" "$URL/api/project" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["work"])' 2>/dev/null)
+if [ -n "$RUNNING" ]; then
+  if [ -n "$WORK" ] && [ "$RUNNING" != "$WORK" ]; then
+    notify-send "Montażownia" "Panel działa na starszym projekcie ($RUNNING). Zamknij jego okno terminala i kliknij ikonę ponownie, żeby otworzyć $WORK."
+  fi
+  xdg-open "$URL" >/dev/null 2>&1
+  exit 0
+fi
 if [ -z "$WORK" ]; then
   echo "Brak projektu z planem montażu (…/montaz/<data>/work/plan_*.json)."
   read -r -p "Enter = zamknij " _
