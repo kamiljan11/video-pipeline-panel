@@ -569,6 +569,7 @@ function inspectGfx(box, gid) {
   $("gsave").onclick = async () => {
     const fields = { type: $("gtype").value, text: $("gtext").value, sub: $("gsub").value, dur: +$("gdur").value, icon: $("gicon").value.trim() || undefined };
     if (!fields.sub && spec.sub == null) delete fields.sub;  // an empty field must not count as a change (the graphic would render again)
+    if (!fields.text && spec.text == null) delete fields.text;  // same for a web card, which has no text
     if ($("gitems")) fields.items = $("gitems").value.split("\n").map((x) => x.trim()).filter(Boolean);
     if ($("ghtml")) fields.html = $("ghtml").value;
     if (fields.type === "web") {

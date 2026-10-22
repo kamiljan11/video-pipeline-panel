@@ -489,10 +489,11 @@ def _clean_spec(s: dict) -> dict:
         out["quote"] = bool(s["quote"])
     if "delays" in s:
         out["delays"] = [_bounded(x, 0, 60, "opóźnienia") for x in _list(s["delays"], "opóźnienia")]
-    for k in WEB_TEXT:  # an emptied field = no such field (a card with an own screenshot has no address)
-        if s.get(k) == "":
-            del out[k]
-    out.update(_web_fields({k: v for k, v in s.items() if k in out}))
+    if s["type"] == "web":  # web fields of other card types pass through as they were (render ignores them)
+        for k in WEB_TEXT:  # an emptied field = no such field (a card with an own screenshot has no address)
+            if out.get(k) == "":
+                del out[k]
+        out.update(_web_fields(out))
     if s["type"] == "list" or "items" in s:
         items = _list(s.get("items"), "punkty listy")
         if s["type"] == "list" and not items:
@@ -505,7 +506,8 @@ WEB_TEXT = ("url", "find", "img")
 
 
 def _web_fields(s: dict) -> dict:
-    """Fields of a "web" card, checked as gfx/webshot.mjs uses them (it checks the address again before opening it)."""
+    """Fields of a "web" card, checked as gfx/webshot.mjs uses them (it checks the address again before opening it;
+    "img" is a plain file name in both)."""
     out: dict = {}
     if "url" in s:
         out["url"] = _str(s["url"], "adres strony", 2000)
@@ -527,9 +529,9 @@ def _web_fields(s: dict) -> dict:
         if len(box) != 4:
             raise EditError("ramka zaznaczenia: [x, y, szerokość, wysokość]")
         out["box"] = [_bounded(x, 0, 100000, "ramka zaznaczenia") for x in box]
-    if s.get("type") == "web" and s.get("canvas") == "v":
+    if s.get("canvas") == "v":
         raise EditError("karta strony: na razie tylko film 16:9 (bez canvas \"v\")")
-    if s.get("type") == "web" and not out.get("img") and not (out.get("url") and len(re.sub(r"[\W_]", "", out.get("find", ""))) >= 8):
+    if not out.get("img") and not (out.get("url") and len(re.sub(r"[\W_]", "", out.get("find", ""))) >= 8):
         raise EditError("karta strony: adres https:// i zdanie ze strony (min. 8 liter), albo własny zrzut")
     return out
 

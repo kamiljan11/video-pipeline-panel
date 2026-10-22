@@ -41,10 +41,9 @@ Jedna nazwa na pojęcie. Pierwsza kolumna = UI i dokumentacja (PL), druga = kod 
 | odrzucony b-roll | `broll_rejected` | klip usunięty w panelu; ani on, ani jego słowo nie wracają przy kolejnym doborze |
 | lista tematów | `broll.topics` w `style/grammar.json` | pary [regex na jednym słowie, angielskie hasło do stocku]; nowy temat = nowa para, bez kodu |
 | karta pionowa | `canvas: "v"` | grafika shortu w górnym pasie kadru 9:16 (np. karta liczby z momentu „liczba”) |
-
-**Karta `web` (karta źródła)** — grafika z przytaczaną stroną albo PDF-em: okno przeglądarki przewija się do zdania `find` i je
-zaznacza; zrzut robi `gfx/webshot.mjs` raz (`work/gfx/web/`), podpis podaje datę zrzutu. Nie jest momentem gramatyki — projektowana
-ręcznie jak `slide` (ADR-0004).
+| karta źródła | `type: "web"` (`url`, `find`) | grafika z przytaczaną stroną albo PDF-em: okno przeglądarki przewija się do zdania `find` i je zaznacza; tylko 16:9; projektowana ręcznie jak `slide`, nie jest momentem gramatyki (ADR-0002 pipeline'u) |
+| zrzut strony | `work/gfx/web/<klucz>.png/.json` | to, co `gfx/webshot.mjs` zapisał raz z sieci; podpis karty podaje jego datę („stan na”) |
+| własny zrzut | `img` (+ `box`) | INNE pojęcie niż zrzut strony: plik zrobiony ręcznie, gdy strona blokuje roboty; `box` = ramka zaznaczenia |
 
 ## Jak dodać nowy typ momentu
 

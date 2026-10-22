@@ -167,6 +167,8 @@ class SpecSchemaTest(unittest.TestCase):
         web = {**SPEC, "type": "web", "url": "https://example.org/r", "find": "zdanie ze strony "}
         s = po.update_spec([web], "a", {"type": "web", "url": "", "img": "zrzut.png"})[0]  # address replaced by a screenshot
         self.assertEqual(("url" in s, s["img"], s["find"]), (False, "zrzut.png", "zdanie ze strony "))  # untouched find kept as is
+        kw = {**SPEC, "type": "kw", "url": "http://stare.pl/"}  # leftovers of another type are not checked as a web card
+        self.assertEqual(po.update_spec([kw], "a", {"dur": 3.0})[0]["url"], "http://stare.pl/")
 
 
 class BeatsTest(unittest.TestCase):
