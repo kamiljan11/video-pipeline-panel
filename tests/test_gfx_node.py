@@ -11,7 +11,9 @@ PIPE = Path(__file__).resolve().parents[2]
 @unittest.skipUnless(shutil.which("node"), "no node")
 class GfxNodeTests(unittest.TestCase):
     def test_gfx_node_tests_pass(self):
-        r = subprocess.run(["node", "--test", *sorted(str(p) for p in (PIPE / "gfx" / "test").glob("*.test.mjs"))],
+        files = sorted(str(p) for p in (PIPE / "gfx" / "test").glob("*.test.mjs"))
+        self.assertTrue(files, f"no JS tests in {PIPE / 'gfx' / 'test'} (the panel lives in ~/video-pipeline/panel)")
+        r = subprocess.run(["node", "--test", *files],
                            cwd=PIPE, capture_output=True, text=True, timeout=300, check=False)
         self.assertEqual(r.returncode, 0, r.stdout[-3000:] + r.stderr[-2000:])
         self.assertRegex(r.stdout, r"ℹ pass [1-9]")
