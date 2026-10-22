@@ -184,9 +184,9 @@ def update_spec(specs: Specs, gfx_id: str, fields: dict) -> Specs:
     if unknown:
         raise EditError(f"nieznane pola grafiki: {', '.join(sorted(unknown))}")
     out = copy.deepcopy(specs)
-    for s in out:
+    for i, s in enumerate(out):
         if s["id"] == gfx_id:
-            s.update(_clean_spec({**s, **fields}))
+            out[i] = _clean_spec({**s, **fields})  # replaced, not merged: an emptied web field is removed
             return out
     raise EditError(f"brak grafiki {gfx_id}")
 
@@ -489,13 +489,19 @@ def _clean_spec(s: dict) -> dict:
         out["quote"] = bool(s["quote"])
     if "delays" in s:
         out["delays"] = [_bounded(x, 0, 60, "opóźnienia") for x in _list(s["delays"], "opóźnienia")]
-    out.update(_web_fields(s))
+    for k in WEB_TEXT:  # an emptied field = no such field (a card with an own screenshot has no address)
+        if s.get(k) == "":
+            del out[k]
+    out.update(_web_fields({k: v for k, v in s.items() if k in out}))
     if s["type"] == "list" or "items" in s:
         items = _list(s.get("items"), "punkty listy")
         if s["type"] == "list" and not items:
             raise EditError("lista: dodaj co najmniej jeden punkt")
         out["items"] = [_str(x, "punkt listy") for x in items]
     return out
+
+
+WEB_TEXT = ("url", "find", "img")
 
 
 def _web_fields(s: dict) -> dict:
@@ -506,18 +512,23 @@ def _web_fields(s: dict) -> dict:
         if not out["url"].startswith("https://"):
             raise EditError("adres strony: tylko https://")
     if "find" in s:
-        out["find"] = _str(s["find"], "zdanie do zaznaczenia")
+        out["find"] = _str(s["find"], "zdanie do zaznaczenia", 1000)
     if "img" in s:
         out["img"] = _str(s["img"], "własny zrzut", 200)
         if not out["img"] or out["img"].startswith(".") or "/" in out["img"] or "\\" in out["img"]:
             raise EditError("własny zrzut: nazwa pliku z katalogu projektu (bez ścieżki)")
     if "page" in s:
-        out["page"] = int(_bounded(s["page"], 1, 5000, "strona PDF"))
+        page = _bounded(s["page"], 1, 5000, "strona PDF")
+        if page != int(page):
+            raise EditError("strona PDF: liczba całkowita")
+        out["page"] = int(page)
     if "box" in s:
         box = _list(s["box"], "ramka zaznaczenia")
         if len(box) != 4:
             raise EditError("ramka zaznaczenia: [x, y, szerokość, wysokość]")
         out["box"] = [_bounded(x, 0, 100000, "ramka zaznaczenia") for x in box]
+    if s.get("type") == "web" and s.get("canvas") == "v":
+        raise EditError("karta strony: na razie tylko film 16:9 (bez canvas \"v\")")
     if s.get("type") == "web" and not out.get("img") and not (out.get("url") and len(re.sub(r"[\W_]", "", out.get("find", ""))) >= 8):
         raise EditError("karta strony: adres https:// i zdanie ze strony (min. 8 liter), albo własny zrzut")
     return out

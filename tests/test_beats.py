@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from montazownia import planops
+from montazownia import planops, timeline
 
 PIPE = Path(__file__).resolve().parents[2]
 
@@ -237,6 +237,18 @@ class GrammarFileTest(unittest.TestCase):
         drawn = set(re.findall(r'"(\w+)"', m.group(1)))
         self.assertEqual(set(beatfx.SFX) - {None}, played)
         self.assertEqual(set(beatfx.SFX) - {None}, drawn)
+
+    def test_card_type_lists_match_gfx_types(self):
+        # gfx_types.py holds the lists for the pipeline; the panel and make_beds keep copies that must not drift
+        gt = _load("gfx_types")
+        self.assertEqual(set(timeline.BOX_TYPES), set(gt.SIDE_BOX))
+        tl = (PIPE / "panel" / "montazownia" / "timeline.py").read_text()
+        m = re.search(r'if ty in \(([^)]*)\):  # = music/make_beds\.py', tl)
+        assert m, "timeline.sfx_events no longer lists the whoosh cards"
+        self.assertEqual(set(re.findall(r'"(\w+)"', m.group(1))), set(gt.CARD_WHOOSH) | {"end"})
+        m = re.search(r'if ty in \(([^)]*)\): put\(o\["at"\] - 0\.3, whoosh\(0\.8\)', (PIPE / "music" / "make_beds.py").read_text())
+        assert m, "make_beds no longer lists the whoosh cards"
+        self.assertEqual(set(re.findall(r'"(\w+)"', m.group(1))), set(gt.CARD_WHOOSH))
 
     def test_icons_effects_regexes_and_shape_are_checked(self):
         cases = {r"icons\.github": lambda g: g["icons"].update({"github|repozytor": "folder-git-3x"}),

@@ -155,9 +155,18 @@ class SpecSchemaTest(unittest.TestCase):
         for bad in ({"type": "web"}, {**web, "url": "http://example.org/"}, {**web, "url": "file:///etc/passwd"},
                     {**web, "find": "za mało"}, {**web, "find": 5}, {"type": "web", "img": "../sekret.png"},
                     {"type": "web", "img": "a/b.png"}, {"type": "web", "img": ".ukryty.png"}, {**web, "page": 0},
-                    {**web, "box": [1, 2, 3]}, {**web, "url": "https://x.pl/" + "a" * 2000}):
+                    {**web, "box": [1, 2, 3]}, {**web, "url": "https://x.pl/" + "a" * 2000}, {**web, "canvas": "v"},
+                    {**web, "page": 3.5}, {"type": "web", "url": "", "find": "", "img": ""}):
             with self.subTest(bad=bad), self.assertRaises(EditError):
                 po.update_spec([SPEC], "a", bad)
+
+    def test_web_card_with_own_screenshot_saves_as_the_editor_sends_it(self):
+        own = {**SPEC, "type": "web", "img": "zrzut.png", "box": [1, 2, 3, 4]}
+        s = po.update_spec([own], "a", {"type": "web", "text": "", "dur": 7.0, "url": "", "find": ""})[0]  # empty = no field
+        self.assertEqual((s["dur"], s["img"], "url" in s, "find" in s), (7.0, "zrzut.png", False, False))
+        web = {**SPEC, "type": "web", "url": "https://example.org/r", "find": "zdanie ze strony "}
+        s = po.update_spec([web], "a", {"type": "web", "url": "", "img": "zrzut.png"})[0]  # address replaced by a screenshot
+        self.assertEqual(("url" in s, s["img"], s["find"]), (False, "zrzut.png", "zdanie ze strony "))  # untouched find kept as is
 
 
 class BeatsTest(unittest.TestCase):

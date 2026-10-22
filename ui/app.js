@@ -546,6 +546,7 @@ function inspectGfx(box, gid) {
       ${field("Adres strony (https://)", `<input id="gurl" style="width:100%" value="${esc(spec.url)}">`)}
       ${field("Zdanie ze strony (zostanie zaznaczone)", `<textarea id="gfind" style="min-height:60px">${esc(spec.find)}</textarea>`)}
       ${field("Podpis źródła (puste = domena i tytuł)", `<input id="gsrc" style="width:100%" value="${esc(spec.src)}">`)}
+      ${field("Albo własny zrzut (plik w katalogu projektu, gdy strona blokuje roboty)", `<input id="gimg" style="width:100%" placeholder="zrzut.png" value="${esc(spec.img)}">`)}
     </div>
     ${spec.type === "slide" ? field("HTML slajdu", `<textarea id="ghtml" style="min-height:90px">${esc(spec.html)}</textarea>`) : ""}
     ${field("Długość (s)", num("gdur", spec.dur, 0.1, 'min="0.5" max="60"'))}
@@ -570,7 +571,11 @@ function inspectGfx(box, gid) {
     if (!fields.sub && spec.sub == null) delete fields.sub;  // an empty field must not count as a change (the graphic would render again)
     if ($("gitems")) fields.items = $("gitems").value.split("\n").map((x) => x.trim()).filter(Boolean);
     if ($("ghtml")) fields.html = $("ghtml").value;
-    if (fields.type === "web") { fields.url = $("gurl").value.trim(); fields.find = $("gfind").value.trim(); if ($("gsrc").value.trim() || spec.src != null) fields.src = $("gsrc").value.trim(); }
+    if (fields.type === "web") {
+      // only a real change is sent: a re-trimmed or emptied copy of an untouched field would change the capture (key) of the card
+      for (const [k, el] of [["url", "gurl"], ["find", "gfind"], ["img", "gimg"]]) { const v = $(el).value.trim(); if (v !== String(spec[k] ?? "").trim()) fields[k] = v; }
+      if ($("gsrc").value.trim() || spec.src != null) fields.src = $("gsrc").value.trim();
+    }
     if (!fields.icon) delete fields.icon;
     const lead = +$("glead").value;  // read now: the first save redraws the inspector
     await editOp({ op: "update_spec", id: gid, fields });

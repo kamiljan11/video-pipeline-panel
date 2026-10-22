@@ -22,17 +22,25 @@ specu z Syncthinga nie może zamienić renderu w czytnik lokalnych usług/plikó
 **Decyzja:** B. `gfx/webshot.mjs` robi zrzut (Chrome 1200 px, skala 2) albo strony PDF (`pdftoppm` 216 dpi) i szuka zdania
 `find` (porównanie po samych literach/cyfrach, więc cudzysłowy, myślniki i łamania nie przeszkadzają); `gfx/render.mjs`
 rysuje kartę: okno przeglądarki, przewinięcie do zdania (40 % wysokości okna), marker linia po linii, podpis z datą zrzutu.
-Twarz w rogu jak w `slide` (`gfx_types.PIP`). Wyjście awaryjne: własny zrzut `img` (+ `box`), gdy strona blokuje roboty —
+Twarz w rogu jak w `slide` (`gfx_types.PIP`). Sieć: tylko publiczne adresy sprawdzane PO DNS dla każdego połączenia
+(`gfx/netguard.mjs`: własne zapytania z kontrolą adresu, Chrome przez lokalny proxy z tą samą kontrolą), bo sama nazwa nic
+nie dowodzi (`127.0.0.1.nip.io`, nazwy Tailscale, przekierowanie, DNS rebinding — recenzja security 2026-10-22). Wyjście awaryjne: własny zrzut `img` (+ `box`), gdy strona blokuje roboty —
 blokad nie obchodzimy (żadnego udawania przeglądarki). Banery cookies ukrywane CSS-em, nigdy klikane (żadnej zgody w imieniu Kamila).
 
 **Konsekwencje:** pierwsza sieć w renderze grafik (tylko gdy jest karta `web` bez zrzutu). Brak zdania / HTTP 4xx = film
-się nie renderuje (`FAILED webshot <id>` w `gfx.log`), zgodnie z zasadą fail-fast. Zrzut to stan strony z dnia zrzutu
+się nie renderuje (`FAILED webshot <id>` w `gfx.log` albo w wyniku zadania panelu), zgodnie z zasadą fail-fast; limit
+150 s na kartę, narzędzia (poppler, ffmpeg) po 120 s. Kod HTTP strony ocenia Chrome, nie wstępne zapytanie o typ (żadnego
+udawania przeglądarki, ale też żadnego fałszywego „403” od zapory na zapytanie bez przeglądarki). Zrzut to stan strony z dnia zrzutu
 (podpis „stan na …”); nowy zrzut = usunąć `work/gfx/web/<klucz>.*`. Tylko 16:9 (shorty: wersja z telefonem później).
 Prawo cytatu: krótki fragment z podanym źródłem. Moment w gramatyce montażu: karta jest projektowana ręcznie jak `slide`
 (`auto_gfx.long = []`), więc `style/grammar.json` się nie zmienia.
 
+**Koszt cykliczny:** 0 zł (bez kont i kluczy). Nowa zależność systemowa `poppler-utils` (PDF) i Chrome, który już był.
+Ryzyka bez kosztu: strona się zmieni albo zniknie (zrzut zostaje z datą „stan na”), poppler/ffmpeg czytają obce pliki
+(limit czasu, `-f image2`, PDF do 60 MB).
+
 **Metryka:** filmy z przytoczonym źródłem mają kartę `web` przy pierwszym przytoczeniu; liczba ręcznych zrzutów `img`
 (jeśli > połowa kart, wrócić do opcji C albo dodać obsługę logowania przez Kamila).
 
-**Wykonanie / rollback:** `gfx/webshot.mjs`, `gfx/webshot_lib.mjs` (+ `npm test`), `gfx/render.mjs` (typ `web`),
+**Wykonanie / rollback:** `gfx/webshot.mjs`, `gfx/webshot_lib.mjs`, `gfx/netguard.mjs` (+ `npm test`), `gfx/render.mjs` (typ `web`),
 `gfx_types.py`; panel: typ `web` w edytorze grafik (`planops._web_fields`). Rollback = usunąć karty `web` ze specu.
