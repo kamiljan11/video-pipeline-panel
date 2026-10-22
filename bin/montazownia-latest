@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Desktop icon "Montażownia": the editing panel on the newest project with a plan (render/montaz/<date>/work, ~/Videos/Montaz).
+# Already running -> only opens the page. Runs in a terminal window: closing it stops the panel and its jobs.
+set -u
+URL=http://127.0.0.1:8790
+if curl -s -o /dev/null -m 2 "$URL/"; then
+  xdg-open "$URL" >/dev/null 2>&1
+  exit 0
+fi
+WORK=$(for d in "$HOME"/video-pipeline/render/montaz/*/work "$HOME"/Videos/Montaz/*/work; do
+  compgen -G "$d/plan_*.json" >/dev/null && printf '%s\t%s\n' "$(basename "$(dirname "$d")")" "$d"
+done | sort | tail -n 1 | cut -f2)
+if [ -z "$WORK" ]; then
+  echo "Brak projektu z planem montażu (…/montaz/<data>/work/plan_*.json)."
+  read -r -p "Enter = zamknij " _
+  exit 1
+fi
+echo "Montażownia: $WORK"
+"$(dirname "$(readlink -f "$0")")/montazownia" "$WORK" || read -r -p "Panel się zatrzymał (błąd wyżej). Enter = zamknij " _
