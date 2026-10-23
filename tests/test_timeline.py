@@ -45,6 +45,15 @@ class TimelineTest(unittest.TestCase):
         ev = [(round(e["t"], 3), e["kind"]) for e in timeline.sfx_events(edl, {"c": {"id": "c", "type": "count", "text": "95%"}})]
         self.assertIn((3.03, "pop"), ev)  # the other events come from the EDL's zoom ramps
 
+    def test_maxim_whoosh_and_a_cards_own_moments(self):
+        edl = {**EDL, "overlays": [{"id": "m", "at": 3.0, "dur": 4.0}]}
+        sp = {"m": {"id": "m", "type": "maxim", "text": "x", "sfx": [[1.0, "pen"], [2.0, "whoosh"], [1.5, "nosuch"], ["x", "pop"], [1.2]]}}
+        ev = [(round(e["t"], 3), e["kind"]) for e in timeline.sfx_events(edl, sp)]
+        self.assertIn((2.9, "whoosh"), ev)
+        self.assertIn((4.0, "pen"), ev)
+        self.assertIn((4.95, "whoosh"), ev)
+        self.assertFalse([e for e in ev if 4.4 < e[0] < 4.6])  # malformed or unknown entries make no sound (= make_beds)
+
     def test_sfx_follow_graphics_and_ramps(self):
         ev = [(e["t"], e["kind"]) for e in timeline.sfx_events(EDL, SPECS)]
         self.assertEqual(ev, [(2.03, "pop"), (4.95, "whoosh"), (6.0, "whoosh"), (6.55, "pop"), (7.05, "pop")])

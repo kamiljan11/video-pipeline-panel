@@ -5,6 +5,7 @@ transcript and gfx_specs. Nothing here decides the edit; it only places what the
 """
 from __future__ import annotations
 
+import math
 import os
 import re
 from typing import Any
@@ -88,6 +89,12 @@ def sfx_events(edl: dict, specs: dict[str, dict]) -> list[dict]:
             ev.append((o["at"] - 0.3, "whoosh"))
         if ty == "cta":
             ev.append((o["at"] + 0.1, "ding"))
+        if ty == "maxim":
+            ev.append((o["at"] - 0.1, "whoosh"))
+        for e in sp.get("sfx") or []:  # the card's own moments (= music/make_beds.py CARD_SFX)
+            if isinstance(e, list) and len(e) == 2 and isinstance(e[0], (int, float)) and math.isfinite(e[0]) \
+                    and isinstance(e[1], str) and e[1] in ("pop", "whoosh", "ding", "pen"):
+                ev.append((o["at"] + e[0] - (0.05 if e[1] == "whoosh" else 0.0), e[1]))
     acc = 0.0
     for s in edl["segments"]:
         z = s.get("zoom")

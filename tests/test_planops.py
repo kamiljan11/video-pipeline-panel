@@ -156,6 +156,13 @@ class SpecSchemaTest(unittest.TestCase):
                 po.update_spec([SPEC], "a", {"type": "count", "text": text})
 
 
+    def test_maxim_card_needs_a_sentence(self):
+        s = po.update_spec([SPEC], "a", {"type": "maxim", "text": "Pierwszy projekt ma *zbudować zaufanie*"})[0]
+        self.assertEqual(s["type"], "maxim")
+        for text in ("", "  ", "**", ["dwa", "teksty"]):
+            with self.subTest(text=text), self.assertRaises(EditError):
+                po.update_spec([SPEC], "a", {"type": "maxim", "text": text})
+
     def test_web_card_fields(self):
         web = {"type": "web", "url": "https://example.org/raport", "find": "95 procent firm nie widzi zwrotu"}
         s = po.update_spec([SPEC], "a", {**web, "page": 3, "src": "Źródło: MIT"})[0]

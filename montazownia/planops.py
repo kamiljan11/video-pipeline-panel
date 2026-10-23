@@ -20,7 +20,8 @@ Specs = list[dict[str, Any]]
 # build_edl.py searches find+near anchors in these windows (gfx: +-25 words, emph: +-30 words)
 GFX_WINDOW, EMPH_WINDOW = 25, 30
 NO_FACE_LIMIT = 2.0  # face_track sets no zmax when it found no face in a shot: no head to keep in frame (UI says so)
-SPEC_TYPES = ("kw", "count", "list", "lower", "chap", "cta", "slide", "end", "web")
+SPEC_TYPES = ("kw", "count", "list", "lower", "chap", "cta", "slide", "end", "web", "maxim")
+MAXIM_MAX = 140  # a "maxim" longer than this covers the face (16:9 bottom band, 9:16 top band)
 SPEC_FIELDS = {"text", "sub", "icon", "icons", "items", "delays", "type", "dur", "html", "src",
                "canvas", "quote", "beat",  # cards of the editing grammar (beats.py)
                "url", "find", "img", "box", "page"}  # "web": the cited page (gfx/webshot.mjs)
@@ -499,6 +500,10 @@ def _clean_spec(s: dict) -> dict:
         if s["type"] == "list" and not items:
             raise EditError("lista: dodaj co najmniej jeden punkt")
         out["items"] = [_str(x, "punkt listy") for x in items]
+    text = out.get("text")
+    if s["type"] == "maxim" and not (isinstance(text, str) and text.replace("*", "").strip() and len(text) <= MAXIM_MAX):
+        raise EditError(f"złota myśl: jedno zdanie do napisania na ekranie, najwyżej {MAXIM_MAX} znaków "
+                        "(słowa w *gwiazdkach* = wyróżnienie); dłuższe zasłoni twarz")
     if s["type"] == "count" and not counts_something(out.get("text")):
         raise EditError("licznik: tekst z liczbą do odliczania, np. „95%” albo „2,5 dnia” (jeden tekst, nie lista; "
                         "nie liczy „B2B”, „Q3”, „15:30”, „10.5”, „007”)")
