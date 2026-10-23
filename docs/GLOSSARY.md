@@ -8,6 +8,9 @@ Jedna nazwa na pojęcie. Pierwsza kolumna = UI i dokumentacja (PL), druga = kod 
 | plan | `plan_<film>.json` | wejście montażu pisane przez AI i panel: co zostaje, gdzie grafiki, najazdy, ustawienia |
 | EDL | `edl_<film>.json` | wynik `build_edl.py` + `face_track.py`: lista ujęć w kolejności filmu; panel go tylko czyta |
 | zostaje / wycięte | `keeps` | zakresy słów (indeksy w transkrypcji), które trafiają do filmu, w kolejności montażu |
+| krawędź ujęcia | `t0` / `t1` keepa, `edges.py` | sekunda nagrania, od której / do której keep gra; wyliczana ze słów albo jawna w planie (`{"t0": …}`) |
+| martwa cisza | C12, `edges.DEAD_AIR` | cisza > 0,6 s tuż przy cięciu (krawędź wpadła w długą pauzę, bo whisper rozciągnął słowo) |
+| dołek energii | `edge_fix.dips`, `dip_db` | miejsce obok cięcia, gdzie 30 ms nagrania jest cichsze niż −35 dBFS: tam cięcie nie urywa dźwięku |
 | ujęcie | segment (`segments[]`) | ciągły kawałek źródła między dwoma cięciami |
 | zoom na cięciu | `zoom` (liczba), `zooms` | stałe powiększenie ujęcia, zmienia się na cięciach |
 | drift | `zoom` {a,b,t0≈0}, `drift` | powolny zoom przez całe ujęcie |
@@ -16,7 +19,7 @@ Jedna nazwa na pojęcie. Pierwsza kolumna = UI i dokumentacja (PL), druga = kod 
 | bezpieczny limit | `zmax` | największy zoom, przy którym głowa zostaje w kadrze (liczy `face_track.py`); panel i pipeline nie pozwalają wyżej |
 | grafika | overlay, `gfx`, `gfx_specs.json` | plansza HTML wyrenderowana do `.mov` (`gfx/render.mjs`); `kw`, `count` (licznik: liczby z tekstu odliczane od 0, GSAP), `list`, `lower`, `chap`, `cta`, `slide`, `end`, `web` |
 | przesunięcie grafiki | `lead` | sekundy od słowa-zaczepu do startu grafiki |
-| krytyk | `critic.py`, C1–C11 | reguły jakości (C1 brak wydarzenia wizualnego, C3 short bez zmiany obrazu, C6 ekran końcowy, C9 liczby bez źródła, C10 gramatyka montażu, C11 b-roll z planu, którego nie dało się ułożyć…) |
+| krytyk | `critic.py`, C1–C13 | reguły jakości (C1 brak wydarzenia wizualnego, C3 short bez zmiany obrazu, C6 ekran końcowy, C9 liczby bez źródła, C10 gramatyka montażu, C11 b-roll z planu, którego nie dało się ułożyć, C12 martwa cisza na krawędzi ujęcia, C13 cięcie w głośnej mowie…) |
 | akceptuję | `critic_accept` | świadomy wyjątek od uwagi krytyka, z powodem |
 | poprawki automatyczne | `critic.py --fix` | krytyk sam dopisuje najazdy / ogon; w panelu najpierw diff |
 | zweryfikowane liczby | `verified_claims` | id grafik, których liczby mają potwierdzone źródło (C9 ich nie zgłasza) |

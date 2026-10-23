@@ -4,8 +4,10 @@ Runs the scripts as they were before the panel (tests/pipeline_baseline/*.py.ori
 ~/video-pipeline itself is not in git) and the current scripts side by side on a copy of the sample project,
 in a temp dir (never in ~/Videos: absolute output paths are rewritten).
 """
+import array
 import itertools
 import json
+import math
 import os
 import shutil
 import stat
@@ -13,7 +15,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import wave
 from pathlib import Path
+from typing import ClassVar
 
 PIPE = Path(__file__).resolve().parents[2]
 BASELINE = Path(__file__).resolve().parent / "pipeline_baseline"  # build_edl, critic, assemble before the panel; make_beds, face_track before beats
@@ -67,6 +71,130 @@ class SteadyXTest(unittest.TestCase):
                          self.run_ft([(0.30, 0.1)] * 2, [1.0, 1.2], v))
         with self.assertRaises(AssertionError):  # a named error (exit 1), never a silent 1-second window from "true"
             self.run_ft([(0.30, 0.1)] * 2, [1.0, 1.2], {"steady_x": "true"})
+
+
+class EdgeFixTest(unittest.TestCase):
+    """plan "edge_fix" (edges.py) and critic C12/C13 on a made-up 10 s recording: tones where speech is, silence elsewhere.
+
+    words (whisper times):  Raz 1.0-1.5 | dwa 1.6-2.0 | eee 2.1-2.85 (really 2.1-2.3) | trzy 3.0-6.5 (squashed: really starts at 6.0) |
+                            cztery 6.6-7.2 | yyy 7.3-7.6 | pięć 7.7-8.3
+    sound: 1.0-2.0, 2.1-2.3, 6.0-7.68 without a break (whisper ends "yyy" too early), a dip, 7.76-8.3; .sil = the long gaps
+    """
+    WORDS: ClassVar = [(1.0, 1.5, " Raz"), (1.6, 2.0, " dwa"), (2.1, 2.85, " eee"), (3.0, 6.5, " trzy"), (6.6, 7.2, " cztery"),
+             (7.3, 7.6, " yyy"), (7.7, 8.3, " pięć")]
+    SOUND: ClassVar = [(1.0, 2.0), (2.1, 2.3), (6.0, 7.68), (7.76, 8.3)]
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp(prefix="edges-"))
+        self.addCleanup(shutil.rmtree, self.d, True)
+        (self.d / "rec.cw.json").write_text(json.dumps({"transcription": [
+            {"offsets": {"from": round(a * 1000), "to": round(b * 1000)}, "text": t} for a, b, t in self.WORDS]}))
+        (self.d / "rec.sil").write_text("".join(f"silence_start: {a}\nsilence_end: {b}\n" for a, b in ((0, 1.0), (2.4, 6.0), (8.3, 10))))
+        sr = 16000
+        pcm = array.array("h", (int(8000 * math.sin(2 * math.pi * 220 * i / sr)) if any(a <= i / sr < b for a, b in self.SOUND) else 0
+                                for i in range(10 * sr)))
+        with wave.open(str(self.d / "rec.wav"), "wb") as w:
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(sr); w.writeframes(pcm.tobytes())
+
+    def run_build(self, keeps, script=PIPE, **extra):
+        plan = {"words": "rec.cw.json", "sil": "rec.sil", "src": "rec.mp4", "keeps": keeps, "edl_out": "edl.json", **extra}
+        (self.d / "plan.json").write_text(json.dumps(plan))
+        return subprocess.run([sys.executable, str(script / "build_edl.py"), "plan.json"], cwd=self.d, capture_output=True, text=True, check=False)
+
+    def build(self, keeps, script=PIPE, **extra):
+        r = self.run_build(keeps, script, **extra)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r, json.loads((self.d / "edl.json").read_text())["segments"]
+
+    def critic(self, *flags):
+        r = subprocess.run([sys.executable, str(PIPE / "critic.py"), "plan.json", "--json", "c.json", *flags], cwd=self.d,
+                           capture_output=True, text=True, check=False)
+        self.assertIn(r.returncode, (0, 1), r.stderr)
+        return [(i["code"], i["msg"]) for i in json.loads((self.d / "c.json").read_text())["issues"] if i["code"] in ("C12", "C13")]
+
+    def test_a_start_inside_a_long_silence_moves_to_the_sound(self):
+        r, old = self.build([[3, 4]])
+        self.assertAlmostEqual(old[0]["in"], 2.9)  # without the key: 3.1 s of dead air (the bug of 2026-10-23)
+        self.assertEqual(self.critic("--edges")[0], ("C12", "0:00.00 początek ujęcia: 3.1 s ciszy przy cięciu (źródło 2.90s)"))
+        c12 = next(i for i in json.loads((self.d / "c.json").read_text())["issues"] if i["code"] == "C12")
+        self.assertEqual(c12["at"], 0.0)  # output time: the panel puts the marker on the timeline from it
+        r, new = self.build([[3, 4]], edge_fix=True)
+        self.assertAlmostEqual(new[0]["in"], 6.0 - 0.08)
+        self.assertIn("edge_fix moved 1 keep edges", r.stdout)
+        self.assertNotIn("C12", [c for c, _ in self.critic()])  # the key alone turns the checks on
+
+    def test_an_end_inside_a_long_silence_moves_back_to_the_sound(self):
+        _, old = self.build([[0, 1, {"t1": 3.5}]])  # explicit, without the key: re-snapped by nothing, 1.1 s of dead air
+        self.assertEqual(old[0]["out"], 3.5)
+        _, old = self.build([[0, 2]])  # whisper stretched "eee" to 2.85: the computed end 2.97 is 0.57 s into the 2.4-6.0 gap
+        self.assertAlmostEqual(old[-1]["out"], 2.97)
+        _, new = self.build([[0, 2]], edge_fix=True)  # back to just after the sound
+        self.assertAlmostEqual(new[-1]["out"], 2.4 + 0.12)
+
+    def test_an_explicit_t0_t1_is_final_with_the_key(self):
+        _, old = self.build([[0, 1, {"t1": 2.6}]])
+        self.assertAlmostEqual(old[0]["out"], 2.52)  # the old silence snap pulls the editor's value back
+        _, new = self.build([[0, 1, {"t1": 2.6}]], edge_fix=True)
+        self.assertEqual(new[0]["out"], 2.6)
+        _, new = self.build([[3, 4, {"t0": 2.9}]], edge_fix={"dips": True})  # not even the dead-air trim touches it
+        self.assertEqual(new[0]["in"], 2.9)
+
+    def test_dips_move_a_loud_cut_to_the_nearest_quiet_spot_or_leave_it_and_report_it(self):
+        _, off = self.build([[3, 4], [6, 6]], edge_fix=True)
+        self.assertAlmostEqual(off[1]["in"], 7.62)  # in the tail of "yyy" (sound until 7.68)
+        self.assertEqual([c for c, _ in self.critic()], ["C13", "C13"])  # end of "cztery" and start of "pięć" both chop sound
+        _, on = self.build([[3, 4], [6, 6]], edge_fix={"dips": True})
+        self.assertAlmostEqual(on[1]["in"], 7.695)  # first spot where 30 ms around the cut are quiet
+        self.assertAlmostEqual(on[0]["out"], off[0]["out"])  # continuous sound up to the next word's start + 60 ms: no dip, left alone
+        found = self.critic()
+        self.assertEqual(len(found), 1)
+        self.assertRegex(found[0][1], r"^0:01\.\d\d cięcie w głośnej mowie \(-\d+ dB, koniec ujęcia, źródło 7\.27s\)$")
+
+    def test_no_key_or_false_is_the_old_build(self):
+        base = self.d / "base"; base.mkdir()
+        shutil.copy(BASELINE / "build_edl.py.orig", base / "build_edl.py")
+        for keeps in ([[3, 4]], [[0, 1, {"t1": 2.6}]], [[3, 4], [6, 6]], [[0, 1], [3, 6]], [[0, 3], [1, 2]]):
+            old_r, old = self.build(keeps, script=base)
+            for r, new in (self.build(keeps), self.build(keeps, edge_fix=False)):
+                self.assertEqual((new, r.stdout), (old, old_r.stdout), keeps)
+        self.assertEqual(self.critic(), [])  # edge_fix false: no C12/C13 either (only with --edges)
+
+    def test_overlapping_keeps_never_replay_a_computed_start_and_never_invert(self):
+        _, segs = self.build([[0, 1], [1, 2]], edge_fix=True)  # next keep repeats "dwa": its start moves to where the first ended
+        self.assertEqual(segs[1]["in"], segs[0]["out"])
+        _, segs = self.build([[0, 1], [1, 2, {"t0": 1.2}]], edge_fix=True)  # the editor's explicit t0 stays, even replaying
+        self.assertEqual(segs[1]["in"], 1.2)
+        r = self.run_build([[0, 3], [1, 2]], edge_fix=True)  # a keep inside the previous one: a named error, never in > out
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("lies inside the previous keep", r.stderr)
+        r = self.run_build([[0, 1, {"t0": 5.0, "t1": 4.0}]], edge_fix=True)  # the editor's own inverted values: named as such
+        self.assertIn("check its t0/t1", r.stderr)
+
+    def test_bad_values_and_a_missing_or_unreadable_wav_are_named(self):
+        for bad in ("yes", {"win": 0}, {"loud_db": "x"}, {"dips": "false"}):
+            r = self.run_build([[3, 4]], edge_fix=bad)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("edge_fix", r.stderr)
+        with wave.open(str(self.d / "rec.wav"), "wb") as w:  # 24-bit: build stops by name, the critic still reports the rest
+            w.setnchannels(1); w.setsampwidth(3); w.setframerate(16000); w.writeframes(b"\0" * 3 * 16000)
+        r = self.run_build([[3, 4]], edge_fix={"dips": True})
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("must be 16-bit PCM", r.stderr)
+        self.build([[3, 4]])
+        found = self.critic("--edges")
+        self.assertIn("C12", [c for c, _ in found])
+        self.assertTrue(any(c == "C13" and "nieczytelny" in m for c, m in found), found)
+        with wave.open(str(self.d / "rec.wav"), "wb") as w:  # header for 1 s, the file cut short: never read as silence
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(b"\0" * 2 * 16000)
+        (self.d / "rec.wav").write_bytes((self.d / "rec.wav").read_bytes()[:-4000])
+        r = self.run_build([[3, 4]], edge_fix={"dips": True})
+        self.assertIn("shorter than its header says", r.stderr)
+        (self.d / "rec.wav").unlink()
+        r = self.run_build([[3, 4]], edge_fix={"dips": True})
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("edge_fix.dips: no 16-bit wav", r.stderr)
+        self.build([[3, 4]], edge_fix=True)
+        self.assertIn(("C13", "brak wav nagrania: cięcia w głośnej mowie niesprawdzone"), self.critic())
 
 
 # no sample project = these tests FAIL (they are the "without beats nothing changed" guarantee); a machine that
