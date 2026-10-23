@@ -4,6 +4,7 @@ Runs the scripts as they were before the panel (tests/pipeline_baseline/*.py.ori
 ~/video-pipeline itself is not in git) and the current scripts side by side on a copy of the sample project,
 in a temp dir (never in ~/Videos: absolute output paths are rewritten).
 """
+import itertools
 import json
 import os
 import shutil
@@ -25,6 +26,47 @@ with open(os.environ["FAKE_LOG"], "a") as f:
     f.write(json.dumps(sys.argv[1:]) + "\\n")
 open(sys.argv[-1], "wb").close()
 """
+
+
+class SteadyXTest(unittest.TestCase):
+    """plan "steady_x" on a made-up film: the crop aim formula, the fallback and the vertical no-op (no sample needed)"""
+
+    def run_ft(self, faces, zooms, extra):
+        d = Path(tempfile.mkdtemp(prefix="steady-"))
+        self.addCleanup(shutil.rmtree, d, True)
+        src = d / "src.mp4"  # face_track reads the frame size from the source; every face comes from the cache
+        subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=black:s=2560x1440:d=1", "-c:v", "libx264", str(src)], check=True)
+        segs, cache = [], {}
+        for i, ((x, w), z) in enumerate(zip(faces, zooms)):
+            a, b = 2.0 * i, 2.0 * i + 2.0
+            segs.append({"src": "A", "in": a, "out": b, "zoom": z})
+            for t in (a + 0.1, a + 1.0, b - 0.1):
+                cache[f"{t:.2f}"] = [x, 0.3, w, 0.2]
+        (d / "faces_cache.json").write_text(json.dumps(cache))
+        (d / "edl.json").write_text(json.dumps({"sources": {"A": str(src)}, "segments": segs, **extra}))
+        r = subprocess.run([str(PIPE / ".venv" / "bin" / "python"), str(PIPE / "face_track.py"), str(d / "edl.json")],
+                           capture_output=True, text=True, check=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads((d / "edl.json").read_text())["segments"]
+
+    def test_face_keeps_its_full_frame_screen_x_on_every_zoom(self):
+        segs = self.run_ft([(0.30, 0.1)] * 3, [1.0, 1.2, 1.0], {"steady_x": True})
+        self.assertAlmostEqual(segs[1]["face"][0], 0.35 + (0.5 - 0.35) / 1.2, places=3)  # 0.475: face stays at x 0.35 on screen
+        x0 = segs[1]["face"][0] - 0.5 / 1.2
+        self.assertAlmostEqual((0.35 - x0) * 1.2, 0.35, places=3)
+
+    def test_a_shot_the_anchor_would_cost_zoom_keeps_its_own_aim(self):
+        # the speaker moved right in the last shot: aiming at the film's median face would push the head out at 1.3
+        segs = self.run_ft([(0.30, 0.1)] * 3 + [(0.72, 0.1)], [1.0, 1.2, 1.0, 1.3], {"steady_x": True})
+        self.assertAlmostEqual(segs[3]["face"][0], 0.77, places=3)
+        self.assertEqual(segs[3]["zoom"], 1.3)
+
+    def test_vertical_films_and_a_bad_window(self):
+        v = {"vertical": True}
+        self.assertEqual(self.run_ft([(0.30, 0.1)] * 2, [1.0, 1.2], {**v, "steady_x": True}),
+                         self.run_ft([(0.30, 0.1)] * 2, [1.0, 1.2], v))
+        with self.assertRaises(AssertionError):  # a named error (exit 1), never a silent 1-second window from "true"
+            self.run_ft([(0.30, 0.1)] * 2, [1.0, 1.2], {"steady_x": "true"})
 
 
 # no sample project = these tests FAIL (they are the "without beats nothing changed" guarantee); a machine that
@@ -73,10 +115,12 @@ class CompatTest(unittest.TestCase):
     def test_build_edl_applies_segment_zoom_and_mix_levels(self):
         self.write_plan(self.plan)
         first_in = json.loads(self.edl_from(PIPE)[0])["segments"][0]["in"]
-        self.write_plan({**self.plan, "seg_zoom": {f"{first_in:.2f}": 1.05}, "music_db": -18, "sfx_db": -20})
+        self.write_plan({**self.plan, "seg_zoom": {f"{first_in:.2f}": 1.05}, "music_db": -18, "sfx_db": -20,
+                         "audio": "highpass=f=70,loudnorm=I=-14", "steady_x": True})
         edl = json.loads(self.edl_from(PIPE)[0])
         self.assertEqual(edl["segments"][0]["zoom"], 1.05)
         self.assertEqual((edl["music_db"], edl["sfx_db"]), (-18, -20))
+        self.assertEqual((edl["audio"], edl["steady_x"]), ("highpass=f=70,loudnorm=I=-14", True))  # for assemble.py / face_track.py
 
     def test_critic_unchanged_and_accept_hides_finding(self):
         self.write_plan(self.plan)
@@ -133,6 +177,20 @@ class CompatTest(unittest.TestCase):
         self.assertTrue(any(self.beds(mk, edl, "plain")[44:]))  # old behaviour: whoosh on every punch
         self.assertFalse(any(self.beds(mk, {**edl, "beat_fx": [{"at": 1.0, "fx": "punch", "sfx": None}]}, "silent")[44:]))
         self.assertTrue(any(self.beds(mk, {**edl, "beat_fx": [{"at": 1.0, "fx": "punch", "sfx": "ding"}]}, "ding")[44:]))
+
+    def test_card_sfx_key_sounds_at_its_moments_from_the_card_start(self):
+        specs = self.tmp / "specs-sfx.json"
+        specs.write_text(json.dumps([{"id": "n", "type": "note", "sfx": [[1.0, "pen"], [2.0, "nosuch"]]}]))
+        edl = {"segments": [{"src": "A", "in": 0.0, "out": 4.0, "zoom": 1.0}], "tail": 0, "gfx_specs": str(specs),
+               "overlays": [{"id": "n", "at": 0.5, "dur": 3.0}]}
+        pcm = self.beds(PIPE / "music" / "make_beds.py", edl, "card-sfx")[44:]
+        frame = 4  # 16-bit stereo
+        loud = [i // frame / 44100 for i in range(0, len(pcm), frame) if pcm[i:i + 2] != b"\0\0"]
+        self.assertTrue(loud)
+        self.assertAlmostEqual(loud[0], 1.5, delta=0.02)  # card at 0.5 s + its moment at 1.0 s; unknown names stay silent
+        self.assertLess(loud[-1], 2.0)
+        specs.write_text(json.dumps([{"id": "n", "type": "note"}]))
+        self.assertFalse(any(self.beds(PIPE / "music" / "make_beds.py", edl, "card-no-sfx")[44:]))
 
     def test_beats_key_drives_punches_and_critic_never_adds_random_ones(self):
         self.write_plan({**self.plan, "emph": [*self.plan.get("emph", []), {"word": 1300, "amt": 0.1, "auto": True}]})
@@ -224,6 +282,28 @@ class CompatTest(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
             out.append((d / "edl.json").read_text())
         self.assertEqual(out[0], out[1])
+
+    def test_steady_x_stops_sideways_jumps_on_cuts_without_losing_zoom(self):
+        edl = json.loads((SAMPLE / "edl_long.json").read_text())  # 16:9: the crop follows each shot's face x
+        for s in edl["segments"]:
+            for k in ("face", "head", "zmax"):
+                s.pop(k, None)
+        py = PIPE / ".venv" / "bin" / "python"
+        res = {}
+        for name, extra in (("plain", {}), ("steady", {"steady_x": True})):
+            d = self.tmp / f"ft-{name}"
+            d.mkdir()
+            shutil.copy(SAMPLE / "faces_cache.json", d / "faces_cache.json")
+            (d / "edl.json").write_text(json.dumps({**edl, **extra}))
+            r = subprocess.run([str(py), str(PIPE / "face_track.py"), str(d / "edl.json")], capture_output=True, text=True, check=False)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            res[name] = json.loads((d / "edl.json").read_text())["segments"]
+        jumps = {n: sum(abs(b["face"][0] - a["face"][0]) for a, b in itertools.pairwise(segs)) for n, segs in res.items()}
+        self.assertLess(jumps["steady"], jumps["plain"] / 2)  # the aim moves far less from shot to shot
+        def peak(z):  # a dict zoom: its highest point
+            return z if not isinstance(z, dict) else max([z["a"], z["b"], *(v for _, v in z.get("keys", []))])
+        for st, pl in zip(res["steady"], res["plain"]):  # no shot zooms less
+            self.assertGreaterEqual(peak(st["zoom"]), peak(pl["zoom"]) - 1e-9)
 
     def test_face_track_keeps_beat_punches_visible_under_the_head_limit(self):
         edl = json.loads((SAMPLE / f"edl_{FILM}.json").read_text())
