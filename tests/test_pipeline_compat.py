@@ -210,6 +210,12 @@ class EdgeFixTest(unittest.TestCase):
         lines = cap("pill.ass")
         self.assertTrue(all(st >= "0:00:01.00" for st, _ in lines), lines)  # nothing starts under the 1 s pill
         self.assertEqual(len(lines), len(cap("old.ass")) - sum(st < "0:00:01.00" for st, _ in cap("old.ass")))
+        (self.d / "specs.json").write_text(json.dumps([{"id": "v_hook", "type": "maxim", "canvas": "v", "pill": True, "text": "x", "dur": 0.7}]))
+        self.build(keeps, ass_out="short_pill.ass", gfx=[{"id": "v_hook", "word": 0}], **short)
+        old_lines = cap("old.ass")
+        self.assertEqual(old_lines[1], ["0:00:00.68", "0:00:01.25"])  # fixture: the 2nd line is still on when a 0.7 s pill leaves (0.78)
+        self.assertEqual(cap("short_pill.ass"), [["0:00:00.78", "0:00:01.25"]] + old_lines[2:])  # shown from the pill's exit: no blank gap
+        (self.d / "specs.json").write_text(json.dumps([{"id": "v_hook", "type": "maxim", "canvas": "v", "pill": True, "text": "x", "dur": 1.0}]))
         for bad in ("yes", 1):
             r = self.run_build(keeps, ass_out="x.ass", caption_box=bad, **short)
             self.assertNotEqual(r.returncode, 0)
