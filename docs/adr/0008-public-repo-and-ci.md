@@ -8,7 +8,7 @@ na dysk Dane: ADR-0007 pipeline'u (`kamiljan11/video-pipeline`, `docs/adr/0007-p
 gdzie żyje, jak CI go testuje i czego publiczność wymaga od repo.
 
 **Decyzja:**
-- Osobne publiczne repo `kamiljan11/montazownia`, klonowane do `panel/` wewnątrz checkoutu pipeline'u (układ jak lokalnie; testy importują `..`).
+- Osobne publiczne repo `kamiljan11/video-pipeline-panel`, klonowane do `panel/` wewnątrz checkoutu pipeline'u (układ jak lokalnie; testy importują `..`).
 - Licencja „all rights reserved” (`LICENSE`), jak pipeline; vis-timeline w `ui/vendor` zostaje na swojej licencji MIT/Apache-2.0.
 - CI (`.github/workflows/quality.yml`): ruff; testy jednostkowe na świeżym checkoucie `kamiljan11/video-pipeline` z tym repo jako `panel/`,
   z `MONTAZ_SLOW=0 MONTAZ_NO_SAMPLE=1` (bez projektu-próbki autora i bez e2e); gitleaks na całej historii, wbudowane reguły

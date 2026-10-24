@@ -1,4 +1,6 @@
-# Montażownia
+# video-pipeline-panel
+
+Internal name: Montażownia (the Python package and the command are still `montazownia`).
 
 **A local browser editor for the [video-pipeline](https://github.com/kamiljan11/video-pipeline): fix what the automatic
 edit got wrong, see it live, render.** FastAPI + plain JavaScript (vis-timeline), no build step. The panel never edits
@@ -19,7 +21,7 @@ Requirements: Linux, Python 3.12 with [uv](https://docs.astral.sh/uv/), Node 24,
 
 ```bash
 git clone https://github.com/kamiljan11/video-pipeline && cd video-pipeline
-git clone https://github.com/kamiljan11/montazownia panel
+git clone https://github.com/kamiljan11/video-pipeline-panel panel
 cd panel && uv venv && uv pip install -r requirements.txt
 bin/montazownia <project>/work            # opens http://127.0.0.1:8790; --port, --out, --no-browser
 MONTAZ_SLOW=0 MONTAZ_NO_SAMPLE=1 .venv/bin/python -m unittest discover -s tests   # without the author's sample project
