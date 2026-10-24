@@ -343,13 +343,15 @@ class RunV4FailureTest(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix="montaz-runv4-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         vp = self.tmp / "vp"
-        for rel in ("build_edl.py", "face_track.py", "critic.py", "assemble.py", "music/make_beds.py", "to_otio.py", "beatfx.py"):
+        for rel in ("build_edl.py", "face_track.py", "critic.py", "assemble.py", "music/make_beds.py", "to_otio.py", "beatfx.py", "behind.py"):
             (vp / rel).parent.mkdir(parents=True, exist_ok=True)
             (vp / rel).write_text(STUB)
         (vp / "gfx").mkdir()
         (vp / "gfx" / "render.mjs").write_text("")
         (vp / ".venv" / "bin").mkdir(parents=True)
         (vp / ".venv" / "bin" / "python").symlink_to(shutil.which("python3") or "/usr/bin/python3")
+        (vp / "matte" / ".venv" / "bin").mkdir(parents=True)
+        (vp / "matte" / ".venv" / "bin" / "python").symlink_to(shutil.which("python3") or "/usr/bin/python3")
         (vp / "render").mkdir()
         src = (Path(__file__).resolve().parents[2] / "run_v4.sh").read_text()
         self.assertIn("VP=/home/kamil-jan/video-pipeline;", src)
@@ -419,6 +421,28 @@ class RunV4FailureTest(unittest.TestCase):
         self.assertIn("FAILED gfx", render)
         self.assertIn("FAILED_FILMS x", render)
         self.assertEqual(calls, "")  # not even build_edl: the cards are shared by every film
+
+    @unittest.skipUnless(shutil.which("node"), "no node")
+    def test_behind_cards_are_cut_out_for_the_final_edl_before_assemble(self):
+        (self.work / "gfx_specs.json").write_text(json.dumps([{"id": "b", "type": "float", "behind": {"edl": "edl_x.json"}}]))
+        render, calls = self.run_v4(CRITIC_FIX="1")
+        order = [c.split()[0] for c in calls.splitlines()]
+        self.assertIn("DONE x", render)
+        self.assertLess(order.index("behind.py"), order.index("assemble.py"))
+        self.assertGreater(order.index("behind.py"), len(order) - 1 - order[::-1].index("build_edl.py"))  # after the last rebuild
+
+    @unittest.skipUnless(shutil.which("node"), "no node")
+    def test_no_behind_cards_no_matting(self):
+        (self.work / "gfx_specs.json").write_text("[]")
+        _, calls = self.run_v4()
+        self.assertNotIn("behind.py", calls)
+
+    @unittest.skipUnless(shutil.which("node"), "no node")
+    def test_failed_behind_renders_no_film(self):
+        (self.work / "gfx_specs.json").write_text(json.dumps([{"id": "b", "behind": {"edl": "edl_x.json"}}]))
+        render, calls = self.run_v4(rc=1, FAIL_behind="1")
+        self.assertIn("FAILED behind x", render)
+        self.assertNotIn("assemble.py", calls)
 
     def test_out_name_with_a_path_is_refused(self):
         for bad in ("../film.mp4", "sub/film.mp4", ".hidden.mp4", ""):

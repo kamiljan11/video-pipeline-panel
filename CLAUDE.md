@@ -8,7 +8,7 @@ Lokalny panel montażowy nad `~/video-pipeline` (opis: `README.md`, decyzje: `do
 - Zmiana w `../build_edl.py`, `../critic.py`, `../assemble.py`, `../face_track.py`, `../music/make_beds.py` tylko pod nowym kluczem
   planu albo flagą, z testem w `tests/test_pipeline_compat.py` (bez klucza wynik identyczny jak `tests/pipeline_baseline/*.py.orig`).
   `../run_v4.sh` -> `RunV4FailureTest` (`tests/test_pipeline_unit.py`); `../beats.py`, `../beatfx.py`, `../style/grammar.json`
-  -> `tests/test_beats.py`; `../broll.py`, `../stock.py` -> `tests/test_broll.py` (bez sieci: fałszywy dostawca). Przed edycją sprawdź mtime: w `~/video-pipeline` pracują też inne sesje.
+  -> `tests/test_beats.py`; `../broll.py`, `../stock.py` -> `tests/test_broll.py` (bez sieci: fałszywy dostawca); `../behind.py` -> `../matte/test_behind.py` (przez `tests/test_behind.py`). Przed edycją sprawdź mtime: w `~/video-pipeline` pracują też inne sesje.
 - `~/video-pipeline` to osobne lokalne repo gita (od 2026-10-21; panel jest w nim ignorowany): zmiany skryptów i `style/`
   commituj tam, zmiany panelu tutaj.
 - Nazwa filmu z HTTP -> zawsze `Panel.known()`; nazwy plików planu tylko `[A-Za-z0-9_-]` (`store.FILM_NAME`; `run_v4.sh` wkleja nazwę do powłoki i `python3 -c`). Nowy endpoint = test w `tests/test_server.py`.
