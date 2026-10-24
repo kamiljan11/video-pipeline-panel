@@ -163,13 +163,14 @@ class EdgeFixTest(unittest.TestCase):
         base = self.d / "base"; base.mkdir()
         shutil.copy(BASELINE / "build_edl.py.orig", base / "build_edl.py")
         keeps = [[0, 1], [3, 6]]
-        self.build(keeps, script=base, ass_out="old.ass")
-        _, old_segs = self.build(keeps, ass_out="new.ass")
+        self.build(keeps, script=base, ass_out="old.ass", hook_text="Hak")
+        _, old_segs = self.build(keeps, ass_out="new.ass", hook_text="Hak")
         self.assertEqual((self.d / "new.ass").read_text(), (self.d / "old.ass").read_text())  # no theme.json: same captions
         self.assertNotIn("theme", json.loads((self.d / "edl.json").read_text()))
         (self.d / "theme.json").write_text(json.dumps({"theme": "cetus"}))
-        _, segs = self.build(keeps, ass_out="new.ass")
+        _, segs = self.build(keeps, ass_out="new.ass", hook_text="Hak")
         ass = (self.d / "new.ass").read_text()
+        self.assertIn("Style: Hook,Montserrat,84,&H00FFFFFF,&H00FFFFFF,&H00000000,&HD830140A,", ass)  # hook box in --ink #0A1430
         self.assertIn("{\\c&HECA76F&}", ass)  # spoken word in the Cetus accent #6FA7EC
         self.assertNotIn("&HC4E22D", ass)
         self.assertEqual(json.loads((self.d / "edl.json").read_text())["theme"], {"name": "cetus", "acc": "#6FA7EC", "ink": "#0A1430"})
