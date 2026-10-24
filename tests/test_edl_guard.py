@@ -3,6 +3,9 @@ Every EDL of the sample and the current projects passes unchanged; text that wou
 protocol is refused with the field named. assemble.py itself: tests/test_pipeline_compat.py (CompatTest.test_assemble_refuses_filter_text_from_the_edl_before_any_ffmpeg)."""
 import importlib.util
 import json
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
@@ -91,6 +94,29 @@ class EdlGuardTest(unittest.TestCase):
                 edl_guard.check({**base(), "segments": [seg]})
         for tail in (0, 1.2, 60):
             self.assertEqual(edl_guard.problems({**base(), "out_name": "95procent_v2_long.mp4", "tail": tail}), [])
+
+
+    def test_script_mode_used_by_run_v4_refuses_with_rc_1(self):
+        """run_v4.sh runs `python3 edl_guard.py edl_<film>.json`: rc 0 passes the film, anything else is FAILED edl_guard"""
+        with tempfile.TemporaryDirectory() as d:
+            good, bad, broken = Path(d) / "good.json", Path(d) / "bad.json", Path(d) / "broken.json"
+            good.write_text(json.dumps(base()))
+            bad.write_text(json.dumps({**base(), "audio": "anull,amovie=/etc/passwd"}))
+            broken.write_text("{")
+
+            def run(*args: str) -> subprocess.CompletedProcess[str]:
+                return subprocess.run([sys.executable, str(PIPE / "edl_guard.py"), *args], capture_output=True, text=True,
+                                      timeout=30, check=False)
+
+            self.assertEqual(run(str(good)).returncode, 0)
+            r = run(str(bad))
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("EDL refused (audio", r.stderr)
+            for args in ((str(broken),), (str(Path(d) / "missing.json"),), ()):
+                with self.subTest(args=args):
+                    r = run(*args)
+                    self.assertEqual(r.returncode, 1)
+                    self.assertNotIn("Traceback", r.stderr)
 
 
 if __name__ == "__main__":
