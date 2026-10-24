@@ -96,5 +96,18 @@
     return clip(o, 0, 1);
   }
 
-  return { clip, smooth, keyAt, zoomAt, trackX, cropRect, locate, overlaysAt, pipOn, subsAt, cutFrom, cssCrop, fadeAt };
+  // What the player still has to prepare for the media status m (beds only when the "podkład" box is on), as a key:
+  // null = nothing to do or the sources are not converted yet. The same key twice = do not start the same job again.
+  function prepareKey(m, bedsOn) {
+    if (!m || m.job) return null;
+    if (!Object.values(m.sources).every((s) => s.ready)) return null;
+    const beds = Boolean(bedsOn && m.todo.beds), cards = m.gfx_busy ? [] : m.todo.cards;  // cards wait for the render
+    if (!cards.length && !beds) return null;
+    return `${m.version}|${cards.join(",")}|${beds ? 1 : 0}`;
+  }
+  // job polls that may fail in a row (3 s apart) before the player gives the job up as lost
+  const WATCH_FAILS = 10;
+
+  return { clip, smooth, keyAt, zoomAt, trackX, cropRect, locate, overlaysAt, pipOn, subsAt, cutFrom, cssCrop, fadeAt,
+    prepareKey, WATCH_FAILS };
 });

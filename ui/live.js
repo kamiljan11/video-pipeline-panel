@@ -89,15 +89,11 @@ const Live = (() => {
   }
   // cheap, small work starts by itself (cards after an edit, beds); the one-time recording copy waits for a click / Play
   function autoPrepare(force) {
-    const m = L.m;
-    if (!m || m.job || L.watching) return;
-    const sourcesOk = Object.values(m.sources).every((s) => s.ready);
-    const beds = $("lbeds").checked && m.todo.beds, cardsTodo = m.gfx_busy ? [] : m.todo.cards;  // cards wait for the render
-    if (!sourcesOk || !(cardsTodo.length || beds)) return;
+    if (L.watching) return;
     // once per (EDL version, missing cards, beds): a card that always fails must not loop, but newly rendered cards
     // (same EDL, other files) and cards skipped while graphics were rendering get their own run
-    const key = `${m.version}|${cardsTodo.join(",")}|${beds ? 1 : 0}`;
-    if (!force && L.autoFor === key) return;
+    const key = C.prepareKey(L.m, $("lbeds").checked);
+    if (key === null || (!force && L.autoFor === key)) return;
     L.autoFor = key; prepare();
   }
   async function prepare() {
@@ -116,7 +112,7 @@ const Live = (() => {
       let j;
       try { j = await H.api(`/api/jobs/${id}?since=${since}`); fails = 0; } catch {
         // the panel restarted (its job table is empty) or is gone: stop following this id like app.js watchJob does
-        if (++fails < 10) { setTimeout(step, 3000); return; }
+        if (++fails < C.WATCH_FAILS) { setTimeout(step, 3000); return; }
         L.watching = null; L.job = null; L.err = "utracono zadanie przygotowania (panel uruchomiony ponownie?)"; status(); return;
       }
       since = j.n;

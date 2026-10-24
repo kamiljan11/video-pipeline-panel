@@ -56,9 +56,11 @@ _FAD = re.compile(r"\\fad\((\d+),(\d+)\)")
 _BORD = re.compile(r"\\bord([\d.]+)")
 
 
-def ass_color(v: str) -> str:
-    """&HAABBGGRR / &HBBGGRR -> CSS rgba(); ASS alpha 00 = opaque."""
+def ass_color(v: str, default: str = "00FFFFFF") -> str:
+    """&HAABBGGRR / &HBBGGRR -> CSS rgba(); ASS alpha 00 = opaque. Not hex (hand-edited file) -> the default colour."""
     h = v.strip().upper().removeprefix("&H").rstrip("&").rjust(8, "0")[-8:]
+    if not re.fullmatch(r"[0-9A-F]{8}", h):
+        h = default
     a, b, g, r = (int(h[k:k + 2], 16) for k in range(0, 8, 2))
     return f"rgba({r},{g},{b},{round(1 - a / 255, 3)})"
 
@@ -119,8 +121,8 @@ def parse_ass(text: str) -> dict:
             f = dict(zip(sfmt, (v.strip() for v in val.split(",", len(sfmt) - 1)), strict=False))
             styles[f.get("Name", "Default")] = {
                 "font": f.get("Fontname", "sans-serif"), "size": _num(f.get("Fontsize", "48"), 48),
-                "color": ass_color(f.get("PrimaryColour", "&H00FFFFFF")), "outline_color": ass_color(f.get("OutlineColour", "&H00000000")),
-                "back_color": ass_color(f.get("BackColour", "&H00000000")), "bold": f.get("Bold", "0") not in ("0", ""),
+                "color": ass_color(f.get("PrimaryColour", "&H00FFFFFF")), "outline_color": ass_color(f.get("OutlineColour", "&H00000000"), "00000000"),
+                "back_color": ass_color(f.get("BackColour", "&H00000000"), "00000000"), "bold": f.get("Bold", "0") not in ("0", ""),
                 "italic": f.get("Italic", "0") not in ("0", ""), "border_style": int(_num(f.get("BorderStyle", "1"), 1)),
                 "outline": _num(f.get("Outline", "0")), "shadow": _num(f.get("Shadow", "0")), "align": int(_num(f.get("Alignment", "2"), 2)),
                 "ml": _num(f.get("MarginL", "0")), "mr": _num(f.get("MarginR", "0")), "mv": _num(f.get("MarginV", "0"))}

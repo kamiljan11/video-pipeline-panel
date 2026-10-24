@@ -6,6 +6,7 @@ import ast
 import json
 import os
 import re
+import runpy
 import shutil
 import subprocess
 import sys
@@ -31,7 +32,10 @@ def assemble_vf(z, face=None, track=None, *, vertical=False, face0=(0.53, 0.42),
     fns: list[ast.stmt] = [n for n in ast.parse(src).body if isinstance(n, ast.FunctionDef) and n.name in ("vf_for", "keys_expr", "track_expr")]
     ns = {"W": 1080 if vertical else 2560, "H": 1920 if vertical else 1440, "SW": sw, "SH": sh, "FX0": face0[0], "FY0": face0[1],
           "vertical": vertical, "TY": ty, "E": "\\", "pairwise": pairwise}
-    exec(compile(ast.Module(body=fns, type_ignores=[]), "assemble.py", "exec"), ns)  # noqa: S102 - our own pipeline script
+    with tempfile.TemporaryDirectory() as d:
+        mod = Path(d) / "assemble_vf.py"
+        mod.write_text(ast.unparse(ast.Module(body=fns, type_ignores=[])), encoding="utf-8")
+        ns = runpy.run_path(str(mod), init_globals=ns)
     return ns["vf_for"](z, face, track)
 
 
@@ -202,6 +206,28 @@ class CoreMatchesAssembleTest(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("node"), "no node")
 class CoreTest(unittest.TestCase):
+    def test_prepare_key_says_what_is_left_and_nothing_when_it_cannot_start(self):
+        def m(**kw):
+            return {"version": "v7", "job": None, "gfx_busy": False, "sources": {"a": {"ready": True}},
+                    "todo": {"cards": ["c1", "c2"], "beds": True}} | kw
+        got = node_core([
+            ["prepareKey", m(), True],
+            ["prepareKey", m(), False],                                           # beds box off
+            ["prepareKey", m(gfx_busy=True), True],                               # cards wait for the render
+            ["prepareKey", m(gfx_busy=True), False],                              # ... and then nothing is left
+            ["prepareKey", m(job={"id": "j"}), True],                             # a job runs already
+            ["prepareKey", m(sources={"a": {"ready": True}, "b": {"ready": False}}), True],  # recording not copied yet
+            ["prepareKey", m(todo={"cards": [], "beds": False}), True],           # all done
+            ["prepareKey", None, True],
+        ])
+        self.assertEqual(got, ["v7|c1,c2|1", "v7|c1,c2|0", "v7||1", None, None, None, None, None])
+
+    def test_a_lost_job_is_given_up_after_a_bounded_number_of_polls(self):
+        js = "process.stdout.write(String(require(process.argv[1]).WATCH_FAILS))"
+        n = int(subprocess.run(["node", "-e", js, str(CORE)], capture_output=True, text=True, timeout=30, check=True).stdout)
+        self.assertTrue(3 <= n <= 20, n)
+        self.assertIn("C.WATCH_FAILS", (PANEL / "ui" / "live.js").read_text(encoding="utf-8"))
+
     def test_zoom_keys_match_the_python_mirror(self):
         keys = [[0.5, 1.0], [1.0, 1.2], [1.0, 1.3], [3.0, 1.1]]
         ts = [0.0, 0.5, 0.75, 0.999, 1.0, 2.0, 3.0, 9.0]
@@ -255,6 +281,11 @@ Dialogue: 0,0:0x:05.00,0:00:06.00,Cap,,0,0,0,,zły czas
         for tag in ("{\\bord.}x", "{\\bord1.2.3}x"):
             with self.subTest(tag=tag):
                 self.assertEqual("".join(r["t"] for r in live.ass_runs(tag)[0]), "x")
+
+    def test_a_broken_style_colour_falls_back_not_fatal(self):
+        a = live.parse_ass("[V4+ Styles]\nFormat: Name, PrimaryColour\nStyle: Cap,&HZZ0000\n")
+        self.assertEqual(a["styles"]["Cap"]["color"], "rgba(255,255,255,1.0)")
+        self.assertEqual(live.ass_color("&H000000FF"), "rgba(255,0,0,1.0)")
 
     def test_parse(self):
         a = live.parse_ass(self.ASS)
