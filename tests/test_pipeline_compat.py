@@ -734,6 +734,10 @@ class CompatTest(unittest.TestCase):
         p.write_text(json.dumps(edl))
         # segments are cut by 6 threads: same commands, any order; the final mix is the last call in both
         old, new = self.ffmpeg_calls(self.base, p), self.ffmpeg_calls(PIPE, p)
+        # scripts spell the pipeline as the literal ~/video-pipeline, themes.py as its resolved path (a symlink to
+        # ~/Dane/video-pipeline since 2026-10-24): one file, two spellings, compared resolved on both sides
+        lit = "/home/kamil-jan/video-pipeline/"
+        old, new = ([c.replace(lit, os.path.realpath(lit) + "/") for c in calls] for calls in (old, new))
         self.assertEqual(sorted(old), sorted(new))
         self.assertEqual(old[-1], new[-1])
 
