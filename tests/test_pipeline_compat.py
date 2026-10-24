@@ -170,7 +170,7 @@ class EdgeFixTest(unittest.TestCase):
         (self.d / "theme.json").write_text(json.dumps({"theme": "cetus"}))
         _, segs = self.build(keeps, ass_out="new.ass", hook_text="Hak")
         ass = (self.d / "new.ass").read_text()
-        self.assertIn("Style: Hook,Montserrat,84,&H00FFFFFF,&H00FFFFFF,&H00000000,&HD830140A,", ass)  # hook box in --ink #0A1430
+        self.assertIn("Style: Hook,Montserrat,84,&H00FFFFFF,&H00FFFFFF,&H0030140A,&H00000000,", ass)  # hook box (OutlineColour) in --ink #0A1430
         self.assertIn("{\\c&HECA76F&}", ass)  # spoken word in the Cetus accent #6FA7EC
         self.assertNotIn("&HC4E22D", ass)
         self.assertEqual(json.loads((self.d / "edl.json").read_text())["theme"], {"name": "cetus", "acc": "#6FA7EC", "ink": "#0A1430"})
