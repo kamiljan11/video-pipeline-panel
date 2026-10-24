@@ -22,7 +22,8 @@ GFX_WINDOW, EMPH_WINDOW = 25, 30
 NO_FACE_LIMIT = 2.0  # face_track sets no zmax when it found no face in a shot: no head to keep in frame (UI says so)
 SPEC_TYPES = ("kw", "count", "list", "lower", "chap", "cta", "slide", "end", "web", "maxim")
 MAXIM_MAX = 140  # a "maxim" longer than this covers the face (16:9 bottom band, 9:16 top band)
-SPEC_FIELDS = {"text", "sub", "icon", "icons", "items", "delays", "type", "dur", "html", "src",
+CARD_SFX = ("pop", "whoosh", "ding", "pen")  # = music/make_beds.py CARD_SFX (test_timeline checks they agree)
+SPEC_FIELDS = {"text", "sub", "icon", "icons", "items", "delays", "type", "dur", "html", "src", "sfx",
                "canvas", "quote", "beat",  # cards of the editing grammar (beats.py)
                "url", "find", "img", "box", "page"}  # "web": the cited page (gfx/webshot.mjs)
 
@@ -187,7 +188,10 @@ def update_spec(specs: Specs, gfx_id: str, fields: dict) -> Specs:
     out = copy.deepcopy(specs)
     for i, s in enumerate(out):
         if s["id"] == gfx_id:
-            out[i] = _clean_spec({**s, **fields})  # replaced, not merged: an emptied web field is removed
+            new = {**s, **fields}
+            if "text" in fields and fields["text"] != s.get("text"):
+                new.pop("at", None)  # per-word times (maxim) belong to the old words: even pace until set again
+            out[i] = _clean_spec(new)  # replaced, not merged: an emptied web field is removed
             return out
     raise EditError(f"brak grafiki {gfx_id}")
 
@@ -490,6 +494,8 @@ def _clean_spec(s: dict) -> dict:
         out["quote"] = bool(s["quote"])
     if "delays" in s:
         out["delays"] = [_bounded(x, 0, 60, "opóźnienia") for x in _list(s["delays"], "opóźnienia")]
+    if "sfx" in s:  # the card's own sounds [[t from the card's start, name], ...] as music/make_beds.py reads them
+        out["sfx"] = [_card_sfx(e) for e in _list(s["sfx"], "dźwięki karty")]
     if s["type"] == "web":  # web fields of other card types pass through as they were (render ignores them)
         for k in WEB_TEXT:  # an emptied field = no such field (a card with an own screenshot has no address)
             if out.get(k) == "":
@@ -552,6 +558,12 @@ def _web_fields(s: dict) -> dict:
     if not out.get("img") and not (out.get("url") and len(re.sub(r"[\W_]", "", out.get("find", ""))) >= 8):
         raise EditError("karta strony: adres https:// i zdanie ze strony (min. 8 liter), albo własny zrzut")
     return out
+
+
+def _card_sfx(e: Any) -> list:
+    if not (isinstance(e, list) and len(e) == 2 and e[1] in CARD_SFX):
+        raise EditError(f"dźwięk karty: [sekunda od startu karty, {' / '.join(CARD_SFX)}]")
+    return [_bounded(e[0], 0, 60, "sekunda dźwięku karty"), e[1]]
 
 
 def _list(v: Any, name: str) -> list:

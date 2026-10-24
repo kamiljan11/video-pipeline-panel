@@ -162,6 +162,23 @@ class SpecSchemaTest(unittest.TestCase):
         for text in ("", "  ", "**", ["dwa", "teksty"]):
             with self.subTest(text=text), self.assertRaises(EditError):
                 po.update_spec([SPEC], "a", {"type": "maxim", "text": text})
+        self.assertEqual(len(po.update_spec([SPEC], "a", {"type": "maxim", "text": "*" + "a" * 138 + "*"})[0]["text"]), 140)
+        with self.assertRaises(EditError):  # 141: the band would cover the face (the stars count)
+            po.update_spec([SPEC], "a", {"type": "maxim", "text": "*" + "a" * 139 + "*"})
+
+    def test_maxim_word_times_go_with_a_new_text(self):
+        m = {"id": "a", "type": "maxim", "text": "Dwa słowa", "dur": 4, "at": [0.2, 0.9]}
+        self.assertEqual(po.update_spec([m], "a", {"dur": 5})[0]["at"], [0.2, 0.9])  # same words: times stay
+        self.assertEqual(po.update_spec([m], "a", {"text": "Dwa słowa"})[0]["at"], [0.2, 0.9])
+        self.assertNotIn("at", po.update_spec([m], "a", {"text": "Inne dwa"})[0])  # new words: even pace
+
+    def test_card_sfx(self):
+        m = {"id": "a", "type": "maxim", "text": "x y", "dur": 4, "sfx": [[1.0, "pen"], [2, "pop"]]}
+        _, specs = po.duplicate_gfx({"gfx": [{"id": "a", "word": 0}]}, [m], "a", "b", 0, 5)
+        self.assertEqual(specs[1]["sfx"], [[1.0, "pen"], [2.0, "pop"]])
+        for sfx in (5, [[1.0, "boom"]], [[-1, "pop"]], [[1.0]], [["x", "pop"]], [[float("nan"), "pop"]]):
+            with self.subTest(sfx=sfx), self.assertRaises(EditError):
+                po.update_spec([m], "a", {"sfx": sfx})
 
     def test_web_card_fields(self):
         web = {"type": "web", "url": "https://example.org/raport", "find": "95 procent firm nie widzi zwrotu"}

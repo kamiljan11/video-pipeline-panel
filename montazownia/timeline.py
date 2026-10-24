@@ -10,7 +10,7 @@ import os
 import re
 from typing import Any
 
-from .planops import EMPH_WINDOW, GFX_WINDOW, kept_indices, resolve
+from .planops import CARD_SFX, EMPH_WINDOW, GFX_WINDOW, kept_indices, resolve
 
 BOX_TYPES = ("kw", "count", "list", "slide", "web")  # = gfx_types.SIDE_BOX  # side boxes: build_edl keeps zoom at 1.0 under them
 
@@ -91,9 +91,10 @@ def sfx_events(edl: dict, specs: dict[str, dict]) -> list[dict]:
             ev.append((o["at"] + 0.1, "ding"))
         if ty == "maxim":
             ev.append((o["at"] - 0.1, "whoosh"))
-        for e in sp.get("sfx") or []:  # the card's own moments (= music/make_beds.py CARD_SFX)
+        own = sp.get("sfx")  # the card's own moments; a malformed entry is skipped, as music/make_beds.py does
+        for e in own if isinstance(own, list) else []:
             if isinstance(e, list) and len(e) == 2 and isinstance(e[0], (int, float)) and math.isfinite(e[0]) \
-                    and isinstance(e[1], str) and e[1] in ("pop", "whoosh", "ding", "pen"):
+                    and isinstance(e[1], str) and e[1] in CARD_SFX:
                 ev.append((o["at"] + e[0] - (0.05 if e[1] == "whoosh" else 0.0), e[1]))
     acc = 0.0
     for s in edl["segments"]:

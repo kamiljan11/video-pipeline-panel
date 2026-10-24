@@ -1,7 +1,10 @@
 """timeline.py on a synthetic EDL: output time, punch-ins the head clamp flattened, SFX marks, critic markers."""
+import re
 import unittest
+from pathlib import Path
 
 from montazownia import timeline
+from montazownia.planops import CARD_SFX
 
 # two shots: source 10-14 s (static) and 20-26 s (punch-in ramp at 1.0 s into the shot)
 EDL = {"segments": [{"in": 10.0, "out": 14.0, "zoom": 1.0},
@@ -53,6 +56,16 @@ class TimelineTest(unittest.TestCase):
         self.assertIn((4.0, "pen"), ev)
         self.assertIn((4.95, "whoosh"), ev)
         self.assertFalse([e for e in ev if 4.4 < e[0] < 4.6])  # malformed or unknown entries make no sound (= make_beds)
+        sp["m"]["sfx"] = 5  # not a list at all: no sound, the timeline still loads
+        self.assertIn((2.9, "whoosh"), [(round(e["t"], 3), e["kind"]) for e in timeline.sfx_events(edl, sp)])
+
+    def test_card_sound_names_match_make_beds(self):
+        src = (Path(__file__).resolve().parents[2] / "music" / "make_beds.py").read_text()
+        beat = re.search(r"^BEAT_SFX = \{(.*)\}$", src, re.MULTILINE)
+        card = re.search(r"^CARD_SFX = \{\*\*BEAT_SFX, (.*)\}$", src, re.MULTILINE)
+        if not (beat and card): self.fail("make_beds.py: BEAT_SFX / CARD_SFX lines not found")
+        names = re.findall(r'"(\w+)": ', beat.group(1) + ", " + card.group(1))
+        self.assertEqual(sorted(names), sorted(CARD_SFX))
 
     def test_sfx_follow_graphics_and_ramps(self):
         ev = [(e["t"], e["kind"]) for e in timeline.sfx_events(EDL, SPECS)]

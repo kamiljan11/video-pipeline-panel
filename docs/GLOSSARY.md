@@ -17,7 +17,9 @@ Jedna nazwa na pojęcie. Pierwsza kolumna = UI i dokumentacja (PL), druga = kod 
 | najazd | `emph`, punch-in | szybki zoom na słowie (`amt` = siła, `speed` = czas w s) |
 | ręczny zoom | `seg_zoom` | zoom ujęcia ustawiony w panelu; klucz = wejście ujęcia w źródle (2 miejsca po przecinku) |
 | bezpieczny limit | `zmax` | największy zoom, przy którym głowa zostaje w kadrze (liczy `face_track.py`); panel i pipeline nie pozwalają wyżej |
-| grafika | overlay, `gfx`, `gfx_specs.json` | plansza HTML wyrenderowana do `.mov` (`gfx/render.mjs`); `kw`, `count` (licznik: liczby z tekstu odliczane od 0, GSAP), `list`, `lower`, `chap`, `cta`, `slide`, `end`, `web` |
+| grafika | overlay, `gfx`, `gfx_specs.json` | plansza HTML wyrenderowana do `.mov` (`gfx/render.mjs`); `kw`, `count` (licznik: liczby z tekstu odliczane od 0, GSAP), `list`, `lower`, `chap`, `cta`, `slide`, `end`, `web`, `maxim` |
+| złota myśl | `maxim`, `MAXIM_MAX` | zdanie-puenta pisane na ekranie litera po literze w chwili, gdy pada; `*słowa*` w akcencie; najwyżej 140 znaków |
+| dźwięk karty | `sfx` w `gfx_specs`, `CARD_SFX` | własne chwile karty `[[s od startu, pop/whoosh/ding/pen]]` dokładane przez `make_beds.py` do podkładu |
 | przesunięcie grafiki | `lead` | sekundy od słowa-zaczepu do startu grafiki |
 | krytyk | `critic.py`, C1–C13 | reguły jakości (C1 brak wydarzenia wizualnego, C3 short bez zmiany obrazu, C6 ekran końcowy, C9 liczby bez źródła, C10 gramatyka montażu, C11 b-roll z planu, którego nie dało się ułożyć, C12 martwa cisza na krawędzi ujęcia, C13 cięcie w głośnej mowie…) |
 | akceptuję | `critic_accept` | świadomy wyjątek od uwagi krytyka, z powodem |
