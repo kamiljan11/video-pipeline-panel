@@ -96,7 +96,8 @@ async function watchJob(id, onDone) {
   };
   tick();
 }
-const label = (k) => ({ rebuild: "Przeliczanie", check: "Krytyk", fix: "Poprawki", preview: "Podgląd", render: "Render", beats: "Momenty", broll: "B-roll" }[k] || k);
+const label = (k) => ({ rebuild: "Przeliczanie", check: "Krytyk", fix: "Poprawki", preview: "Podgląd", render: "Render", beats: "Momenty", broll: "B-roll",
+  gfx: "Grafiki", live: "Odtwarzacz" }[k] || k);
 const statusPl = (s) => ({ queued: "w kolejce", running: "trwa", done: "gotowe", failed: "błąd", stopped: "zatrzymane" }[s] || s);
 
 // ---------- loading ----------
@@ -121,6 +122,7 @@ async function loadFilm(fresh = false) {
   $("undo").title = v.history.undo ? `Cofnij: ${v.history.undo} (Ctrl+Z)` : "Nic do cofnięcia";
   $("redo").title = v.history.redo ? `Ponów: ${v.history.redo}` : "Nic do ponowienia";
   renderTimeline(fresh); renderTranscript(); renderCritic();
+  Live.load(S.film, v.timeline.ready);  // the player re-reads the EDL after every rebuild: edits show without a render
   // a rebuild ends a few seconds after an edit: fields the user started typing into stay as typed (until Zapisz / another selection)
   if (!S.dirty.globals) renderGlobals();
   if (!S.dirty.inspector) renderInspector(); else toast("oś przeliczona; niezapisane pola w inspektorze zostały", false);
@@ -208,14 +210,31 @@ function renderTimeline(fresh) {
   });
   S.timeline.addCustomTime(T(S.playhead), "ph");
   S.timeline.on("select", (p) => select(p.items[0] || null));
-  S.timeline.on("click", (p) => { if (!p.item && p.time) setPlayhead(sec(p.time)); });
+  S.timeline.on("click", (p) => { if (!p.item && p.time) setPlayhead(sec(p.time), "seek"); });
   S.timeline.on("rangechanged", drawWave); S.timeline.on("changed", drawWave);
+  if (S.theatre) compactTimeline(true);
   setTimeout(drawWave, 50);
 }
-function setPlayhead(t) {
+// how: "seek" = the user picked this moment (the player jumps there, also while playing); "player" = the player's own clock;
+// none = the marker moved with a selection or a redraw (the player follows only when paused)
+function setPlayhead(t, how) {
   S.playhead = Math.max(0, t);
   if (S.timeline) S.timeline.setCustomTime(T(S.playhead), "ph");
   markNearWord();
+  if (how === "player") keepInView(S.playhead); else Live.follow(S.playhead, how === "seek");
+}
+function keepInView(t) {  // playback runs off the visible part of the timeline: page along with it
+  if (!S.timeline) return;
+  const w = S.timeline.getWindow(), a = sec(w.start), b = sec(w.end), d = b - a;
+  if (t < a || t > b - d * 0.04) S.timeline.setWindow(T(t - d * 0.1), T(t + d * 0.9), { animation: false });
+}
+const COMPACT_LANES = ["v1", "v2", "v3", "v4", "kr"];
+function compactTimeline(on) {  // big view: picture lanes only, so the player gets the height
+  S.theatre = on;
+  if (!S.timeline) return;
+  S.groups.update(S.groups.get().map((g) => ({ id: g.id, visible: !on || COMPACT_LANES.includes(g.id) })));
+  S.timeline.setOptions({ height: on ? 190 : 305 });
+  setTimeout(drawWave, 50);
 }
 async function moveGfx(item) {
   const gid = item.id.slice(4), t = sec(item.start);
@@ -321,12 +340,12 @@ async function wordAction(i, e) {
     return at >= 0 ? select(`beat:${at}`) : addBeat(i);
   }
   if (e.altKey) {
-    if (w.emph != null) { S.sel = `emph:${w.emph}`; renderInspector(); return; }
+    if (w.emph != null) { S.sel = `emph:${w.emph}`; tab("t-insp"); renderInspector(); return; }
     await editOp({ op: "add_emph", i });
-    const v = S.view.timeline.words[i]; if (v.emph != null) { S.sel = `emph:${v.emph}`; renderInspector(); }
+    const v = S.view.timeline.words[i]; if (v.emph != null) { S.sel = `emph:${v.emph}`; tab("t-insp"); renderInspector(); }
     return;
   }
-  if (w.out != null) setPlayhead(w.out);
+  if (w.out != null) setPlayhead(w.out, "seek");  // a clicked word moves the player there, also while it plays
   await editOp({ op: "toggle_word", i });
 }
 $("allwords").onchange = renderTranscript;
@@ -360,8 +379,9 @@ document.addEventListener("keydown", (e) => {
 function select(id) {
   S.sel = id;
   if (S.timeline) S.timeline.setSelection(id && S.items.get(id) ? [id] : [], { focus: false });
-  if (id && id.startsWith("iss:")) { const c = S.view.timeline.issues.find((x) => `iss:${x.id}` === id); if (c && c.t != null) setPlayhead(c.t); }
-  else if (id && S.items && S.items.get(id)) setPlayhead(sec(S.items.get(id).start));  // preview/new graphic go where you clicked
+  if (id && id.startsWith("iss:")) { const c = S.view.timeline.issues.find((x) => `iss:${x.id}` === id); if (c && c.t != null) setPlayhead(c.t, "seek"); }
+  else if (id && S.items && S.items.get(id)) setPlayhead(sec(S.items.get(id).start), "seek");  // preview/new graphic go where you clicked
+  if (id && !id.startsWith("iss:")) tab("t-insp");  // a critic finding keeps its list in view; anything else opens the inspector
   renderInspector(); renderTranscript();
   const near = document.querySelector("#transcript .near"); if (near) near.scrollIntoView({ block: "center" });
 }
@@ -535,10 +555,10 @@ function inspectGfx(box, gid) {
   const ov = S.view.timeline.overlays.find((o) => o.id === gid);
   if (!spec) { box.innerHTML = `<div class="muted">Brak opisu grafiki ${esc(gid)} w gfx_specs.</div>`; return; }
   const w = S.view.timeline.words.find((x) => x.gfx.includes(gid));
-  const types = ["kw", "count", "list", "lower", "chap", "cta", "slide", "end", "web", "maxim"];
+  const types = ["kw", "count", "list", "lower", "chap", "cta", "slide", "end", "web", "maxim", "float"];  // = planops.SPEC_TYPES
   box.innerHTML = `<h3>Grafika ${esc(gid)} <span class="muted">${ov ? fmt(ov.start) + "–" + fmt(ov.end) : "poza filmem"}</span></h3>
   <div class="grid">
-    ${field("Typ", `<select id="gtype">${types.map((t) => `<option value="${t}"${t === spec.type ? " selected" : ""}>${t === "count" ? "count (licznik: liczba z tekstu odlicza od 0)" : t === "maxim" ? "maxim (złota myśl: zdanie pisane na ekranie, *słowa* w gwiazdkach = wyróżnienie)" : t}</option>`).join("")}</select>`)}
+    ${field("Typ", `<select id="gtype">${types.map((t) => `<option value="${t}"${t === spec.type ? " selected" : ""}>${t === "count" ? "count (licznik: liczba z tekstu odlicza od 0)" : t === "maxim" ? "maxim (złota myśl: zdanie pisane na ekranie, *słowa* w gwiazdkach = wyróżnienie)" : t === "float" ? "float (ilustracja obok mówcy: html w gfx_specs.json)" : t}</option>`).join("")}</select>`)}
     ${field("Tekst", `<input id="gtext" style="width:100%" value="${esc(spec.text)}">`)}
     ${field("Podtytuł", `<input id="gsub" style="width:100%" value="${esc(spec.sub)}">`)}
     ${spec.type === "list" ? field("Punkty (1 na linię)", `<textarea id="gitems">${esc((spec.items || []).join("\n"))}</textarea>`) : ""}
@@ -747,12 +767,15 @@ $("globals").onsubmit = (e) => {
 // ---------- tabs, film switch ----------
 function tab(id) {
   document.querySelectorAll(".tabs button").forEach((b) => { b.classList.toggle("on", b.dataset.tab === id); b.setAttribute("aria-selected", b.dataset.tab === id); });
-  document.querySelectorAll("#lefttabs .pane").forEach((p) => p.classList.toggle("on", p.id === id));
+  document.querySelectorAll("#sidetabs .pane").forEach((p) => p.classList.toggle("on", p.id === id));
 }
 document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => tab(b.dataset.tab)));
 // preview plays by itself, so EVERY preview starts muted (sound only after the user unmutes that one)
 $("video").muted = true;
 $("film").onchange = async () => { S.film = $("film").value; S.sel = null; S.playhead = 0; localStorage.setItem("mz.film", S.film); await loadFilm(true); };
 window.addEventListener("resize", () => drawWave());
+// the live player (ui/live.js) gets the page's helpers; its clock moves the playhead, its big view compacts the timeline
+Live.init({ api, post, toast, esc, fmt, watchJob, reload: () => loadFilm(), onTime: (t) => setPlayhead(t, "player"), onLayout: compactTimeline,
+  log: async (id) => { try { const j = await api(`/api/jobs/${id}`); $("log").textContent += j.lines.join("\n") + "\n"; } catch { /* toasted */ } } });
 setInterval(async () => { try { showBattery((await api("/api/project")).battery); } catch { /* shown by api() */ } }, 60000);
 loadProject().catch((e) => toast(`Nie mogę wczytać projektu: ${e.message}`, true));

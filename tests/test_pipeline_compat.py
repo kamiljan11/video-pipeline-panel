@@ -190,6 +190,19 @@ class EdgeFixTest(unittest.TestCase):
         self.assertEqual(new["tail"], 3)
         self.assertEqual(new["overlays"][0]["at"], round(body, 3))  # the end card starts when the speech ends
 
+    def test_caption_v_moves_only_the_caption_margin(self):
+        keeps = [[0, 1], [3, 6]]
+        self.build(keeps, ass_out="box.ass", vertical=True, caption_box=True)
+        self.build(keeps, ass_out="low.ass", caption_v=450, vertical=True, caption_box=True)
+        box, low = (self.d / "box.ass").read_text().splitlines(), (self.d / "low.ass").read_text().splitlines()
+        diff = [(a, b) for a, b in zip(box, low, strict=True) if a != b]
+        self.assertEqual(len(diff), 1)
+        self.assertTrue(diff[0][0].endswith(",70,70,650,1") and diff[0][1].endswith(",70,70,450,1"), diff)
+        for bad in (450.0, "450", 100, 1200):
+            r = self.run_build(keeps, ass_out="x.ass", caption_v=bad, vertical=True, caption_box=True)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("caption_v: whole px 300..900", r.stderr)
+
     def test_caption_box_and_pill_card_change_only_the_captions(self):
         base = self.d / "base"; base.mkdir()
         shutil.copy(BASELINE / "build_edl.py.orig", base / "build_edl.py")
@@ -272,6 +285,52 @@ class EdgeFixTest(unittest.TestCase):
         self.assertIn("edge_fix.dips: no 16-bit wav", r.stderr)
         self.build([[3, 4]], edge_fix=True)
         self.assertIn(("C13", "brak wav nagrania: cięcia w głośnej mowie niesprawdzone"), self.critic())
+
+
+class MinSegTest(unittest.TestCase):
+    """plan "min_seg": two pause cuts 0.6 s apart leave a 0.87 s flash of picture (the 8:58 "double cut" of 2026-10-24)."""
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp(prefix="minseg-"))
+        self.addCleanup(shutil.rmtree, self.d, True)
+        words = [(1.0, 1.5, " a"), (1.6, 2.9, " b"), (4.05, 4.5, " c"), (5.95, 6.5, " d"), (6.6, 8.2, " e")]
+        (self.d / "rec.cw.json").write_text(json.dumps({"transcription": [
+            {"offsets": {"from": round(a * 1000), "to": round(b * 1000)}, "text": t} for a, b, t in words]}))
+        (self.d / "rec.sil").write_text("".join(f"silence_start: {a}\nsilence_end: {b}\n" for a, b in ((0, 1.0), (3.0, 4.0), (4.6, 5.9), (8.3, 10))))
+
+    def run_build(self, script=PIPE, **extra):
+        plan = {"words": "rec.cw.json", "sil": "rec.sil", "src": "rec.mp4", "keeps": [[0, 4, {"t0": 0.95, "t1": 8.3}]], "edl_out": "edl.json", **extra}
+        (self.d / "plan.json").write_text(json.dumps(plan))
+        return subprocess.run([sys.executable, str(script / "build_edl.py"), "plan.json"], cwd=self.d, capture_output=True, text=True, check=False)
+
+    def segs(self, script=PIPE, **extra):
+        r = self.run_build(script, **extra)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return [(s["in"], s["out"]) for s in json.loads((self.d / "edl.json").read_text())["segments"]]
+
+    def test_without_the_key_the_cut_is_as_before(self):
+        base = self.d / "base"; base.mkdir()
+        shutil.copy(BASELINE / "build_edl.py.orig", base / "build_edl.py")
+        self.assertEqual(self.segs(), self.segs(base))
+        self.assertEqual(self.segs(), [(0.95, 3.15), (3.88, 4.75), (5.78, 8.3)])  # the 0.87 s piece in the middle
+
+    def test_a_short_piece_merges_across_the_smaller_pause(self):
+        # removed 0.73 s before the piece, 1.03 s after it: the smaller pause stays in the film, the longer one is still cut
+        self.assertEqual(self.segs(min_seg=1.0), [(0.95, 4.75), (5.78, 8.3)])
+        self.assertEqual(self.segs(min_seg=0.8), [(0.95, 3.15), (3.88, 4.75), (5.78, 8.3)])  # 0.87 s is long enough here
+
+    def test_a_bad_value_is_a_named_error(self):
+        for bad in ("1", 0, -1, 5, True):
+            r = self.run_build(min_seg=bad)
+            self.assertNotEqual(r.returncode, 0, bad)
+            self.assertIn("min_seg: seconds 0..3", r.stderr)
+
+    def test_seg_exact_takes_only_true_or_false(self):  # assemble.py reads bool(): the string "false" would switch it on
+        for bad in ("false", 1, None):
+            r = self.run_build(seg_exact=bad)
+            self.assertNotEqual(r.returncode, 0, bad)
+            self.assertIn("seg_exact: true or false", r.stderr)
+        self.assertEqual(self.segs(seg_exact=False), self.segs())
 
 
 # no sample project = these tests FAIL (they are the "without beats nothing changed" guarantee); a machine that
@@ -688,6 +747,59 @@ class CompatTest(unittest.TestCase):
         self.assertIn("scale=360:640", final[final.index("-filter_complex") + 1])
         self.assertEqual(final.count("12.500"), 2)  # music and sfx both start at the slice
         self.assertTrue(all("ultrafast" in json.loads(c) for c in calls if "-ss" in json.loads(c)[:4]))
+
+    def test_assemble_seg_exact_cuts_whole_frames_with_matching_sound(self):
+        edl = json.loads((SAMPLE / "edl_long.json").read_text())
+        p = self.tmp / "edl_x.json"
+        p.write_text(json.dumps({**edl, "seg_exact": True}))
+        cuts = {c[c.index("-ss") + 1]: c for c in map(json.loads, self.ffmpeg_calls(PIPE, p)) if "-frames:v" in c}
+        self.assertEqual(len(cuts), len({f"{s['in']:.3f}" for s in edl["segments"]}))  # every segment, none the old way
+        for s in edl["segments"]:
+            c, n = cuts[f"{s['in']:.3f}"], max(1, round((s["out"] - s["in"]) * 30))
+            self.assertEqual(c[c.index("-frames:v") + 1], str(n))
+            self.assertEqual(c[c.index("-t") + 1], f"{n / 30:.3f}")
+            self.assertTrue(c[c.index("-vf") + 1].startswith("setpts=PTS-STARTPTS,"))
+            self.assertIn(f"apad,atrim=0:{n / 30:.6f},", c[c.index("-af") + 1])
+            self.assertTrue(c[-1].endswith("_x.mkv"))  # own cache name: never reuses a segment cut the old way
+
+    def test_build_edl_passes_sound_keys_to_make_beds(self):
+        moods = [[0, "tension"], [30, "upbeat"]]
+        self.write_plan({**self.plan, "sfx_style": "v2", "music_moods": moods})
+        e = json.loads(self.edl_from(PIPE)[0])
+        self.assertEqual((e["sfx_style"], e["music_moods"]), ("v2", moods))
+        self.write_plan(self.plan)
+        self.assertFalse({"sfx_style", "music_moods"} & set(json.loads(self.edl_from(PIPE)[0])))
+
+    def test_build_edl_passes_seg_exact_to_assemble(self):
+        self.write_plan({**self.plan, "seg_exact": True})
+        self.assertIs(json.loads(self.edl_from(PIPE)[0])["seg_exact"], True)
+        self.write_plan(self.plan)
+        self.assertNotIn("seg_exact", json.loads(self.edl_from(PIPE)[0]))
+
+    @unittest.skipIf(os.environ.get("MONTAZ_SLOW", "1") == "0", "real ffmpeg")
+    def test_seg_exact_segments_join_without_gaps(self):
+        """real ffmpeg: odd-length segments of a 30 fps source join with no sound gap, picture and sound end together."""
+        src = self.tmp / "src.mp4"
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=s=320x180:r=30:d=6", "-f", "lavfi",
+                        "-i", "sine=f=440:d=6", "-c:v", "libx264", "-g", "15", "-c:a", "aac", "-shortest", str(src)], check=True)
+        segs = [{"src": "A", "in": a, "out": b, "zoom": 1.0} for a, b in ((0.21, 1.437), (2.05, 2.69), (3.311, 5.2))]
+        edl = {"name": "x", "sources": {"A": str(src)}, "segments": segs, "overlays": [], "w": 320, "h": 180,
+               "out_name": "x.mp4", "seg_exact": True}
+        p = self.tmp / "edl_real.json"
+        p.write_text(json.dumps(edl))
+        out = self.tmp / "real"
+        r = self.run_script(PIPE, "assemble.py", str(p), str(out))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rough = out / "rough.mkv"
+        pk = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "packet=pts_time,duration_time",
+                             "-of", "csv=p=0", str(rough)], capture_output=True, text=True, check=True).stdout.split()
+        ends = [(float(a), float(a) + float(d)) for a, d in (x.split(",") for x in pk)]
+        self.assertEqual([round(s0 - e0, 3) for (_, e0), (s0, _) in itertools.pairwise(ends) if abs(s0 - e0) > 0.002], [])
+        n = sum(max(1, round((s["out"] - s["in"]) * 30)) for s in segs)
+        vp = subprocess.run(["ffprobe", "-v", "error", "-count_packets", "-select_streams", "v", "-show_entries",
+                             "stream=nb_read_packets", "-of", "csv=p=0", str(rough)], capture_output=True, text=True, check=True)
+        self.assertEqual(int(vp.stdout), n)
+        self.assertAlmostEqual(ends[-1][1], n / 30, delta=0.002)
 
 
 if __name__ == "__main__":

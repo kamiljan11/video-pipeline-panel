@@ -19,7 +19,8 @@ p.badge { white-space: normal; display: block; padding: 6px 8px; margin: 6px 0; 
 #top .logo { color: var(--acc); margin-right: 6px; }
 #top .sep { width: 1px; height: 22px; background: var(--line); }
 #top .grow { flex: 1; }
-main { display: flex; height: calc(100% - 50px); }
+body { display: flex; flex-direction: column; }
+main { display: flex; flex: 1; min-height: 0; }  /* the header may wrap to two lines */
 #left { flex: 3; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); }
 #right { flex: 2; min-width: 340px; display: flex; flex-direction: column; }
 #tlwrap { padding: 6px 8px 0; }
@@ -52,17 +53,17 @@ main { display: flex; height: calc(100% - 50px); }
 .sw { display: inline-block; width: 12px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
 .sw.k-static { background: var(--static); } .sw.k-zoom { background: var(--zoom); } .sw.k-drift { background: var(--drift); }
 .sw.k-emph { background: var(--emph); } .sw.k-override { background: var(--override); }
-.tabs { display: flex; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--line); }
+.tabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .tabs button { background: transparent; color: var(--muted); border-radius: 0; border-bottom: 2px solid transparent; }
 .tabs button.on { color: var(--fg); border-bottom-color: var(--acc); }
-.tabbody { flex: 1; min-height: 0; overflow: auto; padding: 8px 10px; }
+.tabbody { flex: 0 0 auto; height: 46%; min-height: 160px; overflow: auto; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .pane { display: none; } .pane.on { display: block; }
 #video { width: 100%; max-height: 42vh; background: #000; }
 #log { margin: 0; font: 12px/1.45 ui-monospace, monospace; white-space: pre-wrap; color: #c9ced6; }
 .grid { display: grid; grid-template-columns: 170px 1fr; gap: 8px 12px; align-items: center; max-width: 720px; }
 .grid label { color: var(--muted); }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
-#inspector { flex: 0 0 auto; max-height: 52%; overflow: auto; padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
+#inspector { padding: 2px 2px; }
 #inspector h3 { margin: 0 0 8px; font-size: 15px; }
 #inspector .grid { grid-template-columns: 120px 1fr; }
 #transhead { display: flex; gap: 10px; align-items: baseline; padding: 8px 12px 4px; flex-wrap: wrap; }
@@ -114,3 +115,46 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .sw.b-force { border: 2px dashed var(--warn); } .sw.b-unknown { border-color: var(--err); }
 #legend .b-off { color: var(--muted); text-decoration: line-through; }
 #inspector .grid > div { min-width: 0; overflow-wrap: anywhere; }  /* long source URLs of b-roll */
+
+/* ---------- live player (ADR-0007): output frame letterboxed in the stage, layers in assemble.py's order ---------- */
+#live { flex: 1 1 0; min-height: 160px; display: flex; flex-direction: column; background: #000; border-bottom: 1px solid var(--line); }
+#livestage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+#liveframe { position: relative; overflow: hidden; background: #000; flex: none; }
+#liveframe .lv, #liveframe .lbroll { position: absolute; left: 0; top: 0; width: 100%; height: 100%; visibility: hidden; }
+#liveframe .lv { object-fit: fill; transform-origin: 0 0; z-index: 1; will-change: transform; }
+#liveframe .lv.on { visibility: visible; z-index: 2; }
+#liveframe.graded .lv { filter: contrast(1.04) saturate(1.07); }  /* = assemble default grade, approximately */
+#liveframe .lbroll { object-fit: cover; z-index: 5; }
+#liveframe .lbroll.on { visibility: visible; }
+#livecards { position: absolute; inset: 0; z-index: 10; pointer-events: none; }
+#livecards .lcard { position: absolute; left: 0; top: 0; visibility: hidden; object-fit: fill; }
+#livecards .lcard.on { visibility: visible; }
+#livecards .lcard.missing { left: 3%; top: auto; bottom: 12%; max-width: 60%; padding: 6px 10px; background: rgba(16, 185, 129, .25);
+  border: 2px dashed var(--gfx); color: #fff; font-size: 13px; border-radius: 6px; }
+#livepip { position: absolute; z-index: 81; overflow: hidden; display: none; }
+#livepip.on { display: block; }
+#livepip canvas { width: 100%; height: 100%; display: block; }
+#livepipframe { position: absolute; z-index: 80; display: none; }
+#livepipframe.on { display: block; }
+#liveprog { position: absolute; left: 0; bottom: 0; z-index: 3; opacity: .85; }  /* = assemble: drawn on the base, under b-roll and cards */
+#livesubs { position: absolute; inset: 0; z-index: 90; pointer-events: none; }
+#livesubs .ls { position: absolute; line-height: 1.22; white-space: pre-wrap; }
+#livesubs .ls > span { box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+#livesubs .ls[data-l="1"] { z-index: 2; }
+#livemsg { position: absolute; inset: 0; z-index: 100; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 4px; padding: 16px; background: rgba(0, 0, 0, .78); color: var(--fg); text-align: center; }
+#livemsg[hidden] { display: none; }
+#livemsg p { margin: 4px 0; max-width: 520px; }
+.err { color: #fca5a5; }
+#lscrub { display: block; width: 100%; height: 14px; cursor: pointer; touch-action: none; }
+#livebar { display: flex; gap: 8px; align-items: center; padding: 4px 8px; background: var(--panel); flex-wrap: wrap; font-size: 13px; }
+#livebar .grow { flex: 1; }
+#livebar .hint { font-size: 11px; }
+#livebar button { padding: 4px 10px; }
+button.mini { padding: 1px 6px !important; font-size: 12px; }
+.mono { font-variant-numeric: tabular-nums; }
+#live:fullscreen { border: 0; }
+#live:fullscreen #livebar .hint { display: none; }
+/* big view (T): the player gets the screen, the timeline keeps only the picture lanes */
+body.theatre #right, body.theatre #legend, body.theatre #wavebox { display: none; }
+body.theatre #left { border-right: 0; }

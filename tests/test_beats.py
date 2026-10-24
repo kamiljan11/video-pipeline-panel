@@ -238,6 +238,19 @@ class GrammarFileTest(unittest.TestCase):
         self.assertEqual(set(beatfx.SFX) - {None}, played)
         self.assertEqual(set(beatfx.SFX) - {None}, drawn)
 
+    def test_every_box_type_can_be_saved(self):
+        # a graphic the timeline draws must also pass the panel's spec check, or saving it fails (float, 2026-10-24)
+        for ty in timeline.BOX_TYPES:
+            with self.subTest(ty=ty):
+                self.assertIn(ty, planops.SPEC_TYPES)
+        self.assertEqual(planops._clean_spec({"id": "f1", "type": "float", "dur": 3, "html": "<div class=\"p\">x</div>"})["type"], "float")
+        with self.assertRaises(planops.EditError):
+            planops._clean_spec({"id": "f1", "type": "float", "dur": 3})
+        app = (PIPE / "panel" / "ui" / "app.js").read_text()  # the inspector's type list: a missing type silently saves as "kw"
+        m = re.search(r"const types = \[([^\]]*)\];  // = planops.SPEC_TYPES", app)
+        assert m, "app.js no longer lists the graphic types"
+        self.assertEqual(re.findall(r'"(\w+)"', m.group(1)), list(planops.SPEC_TYPES))
+
     def test_card_type_lists_match_gfx_types(self):
         # gfx_types.py holds the lists for the pipeline; the panel and make_beds keep copies that must not drift
         gt = _load("gfx_types")

@@ -20,9 +20,9 @@ Specs = list[dict[str, Any]]
 # build_edl.py searches find+near anchors in these windows (gfx: +-25 words, emph: +-30 words)
 GFX_WINDOW, EMPH_WINDOW = 25, 30
 NO_FACE_LIMIT = 2.0  # face_track sets no zmax when it found no face in a shot: no head to keep in frame (UI says so)
-SPEC_TYPES = ("kw", "count", "list", "lower", "chap", "cta", "slide", "end", "web", "maxim")
+SPEC_TYPES = ("kw", "count", "list", "lower", "chap", "cta", "slide", "end", "web", "maxim", "float")  # every type gfx/render.mjs draws
 MAXIM_MAX = 140  # a "maxim" longer than this covers the face (16:9 bottom band, 9:16 top band)
-CARD_SFX = ("pop", "whoosh", "ding", "pen")  # = music/make_beds.py CARD_SFX (test_timeline checks they agree)
+CARD_SFX = ("pop", "whoosh", "ding", "pen", "tick", "type", "click", "riser", "impact", "paper", "scatter", "roar", "swoosh", "drop")  # = music/make_beds.py CARD_SFX (test_timeline checks they agree)
 SPEC_FIELDS = {"text", "sub", "icon", "icons", "items", "delays", "type", "dur", "html", "src", "sfx", "at",
                "canvas", "quote", "beat", "pill",  # cards of the editing grammar (beats.py)
                "url", "find", "img", "box", "page"}  # "web": the cited page (gfx/webshot.mjs)
@@ -487,6 +487,8 @@ def _clean_spec(s: dict) -> dict:
             out[k] = _str(s[k], k)
     if "html" in s:
         out["html"] = _str(s["html"], "html slajdu", 20000)
+    if s["type"] == "float" and not out.get("html"):  # render.mjs puts html in as it is: none = the word "undefined" on screen
+        raise EditError("ilustracja float: potrzebny html")
     if "icon" in s:
         out["icon"] = _icon(s["icon"])
     if "icons" in s:

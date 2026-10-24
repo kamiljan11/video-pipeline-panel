@@ -13,7 +13,7 @@ import signal
 import subprocess
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -92,11 +92,12 @@ def _signal(proc: subprocess.Popen, sig: int) -> None:
 
 
 class Runner:
-    def __init__(self, log_dir: Path) -> None:
+    def __init__(self, log_dir: Path, ids: Iterator[int] | None = None) -> None:
+        """`ids`: a counter shared with another runner (the player's media lane), so job ids never collide."""
         self.log_dir = log_dir
         self.jobs: dict[int, Job] = {}
         self._q: queue.Queue[Job] = queue.Queue()
-        self._ids = itertools.count(1)
+        self._ids = ids if ids is not None else itertools.count(1)
         self.current: Job | None = None
         threading.Thread(target=self._loop, daemon=True, name="jobs").start()
 
@@ -108,14 +109,14 @@ class Runner:
         return job
 
     def busy_with(self, kind: str) -> bool:
-        return any(j.kind == kind and j.status in ("queued", "running") for j in self.jobs.values())
+        return any(j.kind == kind and j.status in ("queued", "running") for j in list(self.jobs.values()))  # list: other lanes' threads ask too
 
     def pending(self, kind: str, film: str) -> Job | None:
         """A queued/running job of this kind for this film (a second click returns it instead of queueing a copy)."""
-        return next((j for j in self.jobs.values() if j.kind == kind and j.film == film and j.status in ("queued", "running")), None)
+        return next((j for j in list(self.jobs.values()) if j.kind == kind and j.film == film and j.status in ("queued", "running")), None)
 
     def active(self) -> list[Job]:
-        return [j for j in self.jobs.values() if j.status in ("queued", "running")]
+        return [j for j in list(self.jobs.values()) if j.status in ("queued", "running")]
 
     def shutdown(self) -> None:
         """Panel is closing: stop everything, so no render keeps writing into the project unseen.

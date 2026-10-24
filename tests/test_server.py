@@ -38,9 +38,9 @@ SPECS = [{"id": "g1", "type": "kw", "text": "jeden", "dur": 2.0}, {"id": "g2", "
 
 class QueueOnly(Runner):
     """Runner whose queue is never consumed: submitted jobs stay 'queued'."""
-    def __init__(self) -> None:  # no worker thread
+    def __init__(self, first: int = 1) -> None:  # no worker thread
         self.jobs, self.current = {}, None
-        self._ids = iter(range(1, 10_000))
+        self._ids = iter(range(first, first + 10_000))
 
     def submit(self, kind, film, steps):
         from montazownia.jobs import Job
@@ -71,6 +71,7 @@ class ServerTest(unittest.TestCase):
         self.work = make_project(self.tmp)
         self.panel = server.Panel(self.work, self.tmp / "out")
         self.panel.runner = QueueOnly()
+        self.panel.media = QueueOnly(50_000)  # the live player's lane: its own ids, like the shared counter keeps them apart
         mock.patch.object(server.pipeline, "foreign_render", return_value=[]).start()
         self.addCleanup(mock.patch.stopall)
         with socket.socket() as s:
@@ -112,6 +113,12 @@ class ServerTest(unittest.TestCase):
                         {"Sec-Fetch-Site": "cross-site"}, {"Sec-Fetch-Site": "same-site"}, {"Host": "evil.example"}):
             with self.subTest(headers=headers), self.assertLogs("montazownia", "WARNING"):
                 self.assertEqual(self.call("/api/stop", {}, headers)[0], 403)
+
+    def test_page_files_are_revalidated_not_cached(self):
+        # a cached app.js beside a new index.html left the live player dead after an update (2026-10-24)
+        for path in ("/", "/app.js", "/live.js"):
+            with self.subTest(path=path), urllib.request.urlopen(f"http://127.0.0.1:{self.port}{path}", timeout=10) as r:
+                self.assertEqual(r.headers.get("Cache-Control"), "no-cache")
 
     def test_undo_rebuilds_the_changed_film_and_rerenders_its_graphic(self):
         st, r = self.call("/api/film/a/edit", {"op": "update_spec", "id": "g1", "fields": {"text": "nowy"}})
@@ -329,6 +336,142 @@ class ServerTest(unittest.TestCase):
     def test_busy_port_is_refused_before_opening_the_browser(self):
         self.assertFalse(server.port_free(self.port))
 
+    # ---- live player (ADR-0007) ----
+    def write_edl(self, **extra):
+        src = self.work / "src.mp4"
+        src.write_bytes(b"recording")
+        mov = self.work / "gfx" / "g1.mov"
+        os.utime(mov, (time.time() - 60, time.time() - 60))  # not being written right now
+        (self.work / "a.ass").write_text("[Script Info]\nPlayResX: 1080\nPlayResY: 1920\n\n[Events]\n"
+                                         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+                                         "Dialogue: 0,0:00:01.00,0:00:02.50,Cap,,0,0,0,,{\\fad(80,0)}RAZ dwa\n")
+        edl = {"sources": {"A": str(src)}, "segments": [{"src": "A", "in": 1.0, "out": 3.0, "zoom": 1.0},
+                                                        {"src": "A", "in": 5.0, "out": 6.5, "zoom": {"a": 1, "b": 1.2, "t0": 0, "t1": 1}}],
+               "overlays": [{"file": str(mov), "at": 0.5, "dur": 2.0, "id": "g1"}], "subs": str(self.work / "a.ass"),
+               "w": 2560, "h": 1440, "tail": 1.0, **extra}
+        (self.work / "edl_a.json").write_text(json.dumps(edl))
+        return edl
+
+    def get_raw(self, path, headers=None):
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}", headers=headers or {})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return r.status, r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.read()
+
+    def test_live_view_is_the_edl_in_output_time(self):
+        self.assertEqual(self.call("/api/film/a/live")[0], 404)  # no EDL yet: "Sprawdź" first
+        self.assertEqual(self.call("/api/film/zz/live")[0], 404)
+        self.write_edl()
+        st, v = self.call("/api/film/a/live")
+        self.assertEqual(st, 200, v)
+        self.assertEqual([(s["start"], s["end"]) for s in v["segments"]], [(0, 2.0), (2.0, 3.5)])
+        self.assertEqual((v["body"], v["total"]), (3.5, 4.5))
+        self.assertEqual(v["sources"]["A"], {"ready": False, "error": None, "url": None})
+        self.assertEqual([(o["id"], o["state"], o["url"], o["label"]) for o in v["overlays"]], [("g1", "todo", None, "jeden")])
+        self.assertEqual(v["todo"], {"proxies": ["A"], "cards": ["g1"], "beds": True})
+        self.assertEqual(v["subs"]["events"][0]["runs"], [{"t": "RAZ dwa", "c": None}])
+        self.assertEqual((v["job"], v["gfx_job"]), (None, None))
+
+    def test_live_media_only_from_the_panel_cache(self):
+        from montazownia import livemedia
+        self.write_edl(theme={"name": "../x", "acc": "#000000"}, broll=[{"at": 0, "dur": 1, "file": "/etc/passwd"}])
+        for path in ("/api/film/a/live/src/A", "/api/film/a/live/src/B", "/api/film/a/live/card/g1", "/api/film/a/live/card/..",
+                     "/api/film/a/live/broll/0", "/api/film/a/live/broll/7", "/api/film/a/live/bed/music",
+                     "/api/film/a/live/bed/edl", "/api/film/a/live/pipframe", "/api/film/zz/live/src/A"):
+            with self.subTest(path=path):
+                self.assertEqual(self.get_raw(path)[0], 404)
+        copy = livemedia.source_file(self.work, self.work / "src.mp4")
+        copy.write_bytes(b"0123456789")
+        self.assertTrue(copy.is_relative_to(self.tmp / "panel"))  # never next to the project files
+        st, body = self.get_raw("/api/film/a/live/src/A", {"Range": "bytes=2-5"})  # <video> seeks by Range
+        self.assertEqual((st, body), (206, b"2345"))
+        v = self.call("/api/film/a/live")[1]
+        self.assertTrue(v["sources"]["A"]["ready"])
+        self.assertIn(f"?v={copy.stem[-12:]}", v["sources"]["A"]["url"])
+
+    def test_live_media_files_are_served(self):
+        from montazownia import livemedia
+        root = self.tmp / "broll"
+        root.mkdir()
+        (root / "clip.mp4").write_bytes(b"stock clip")
+        (root / "out.mp4").symlink_to(self.work / "src.mp4")  # a link in the stock cache pointing out of it
+        frame = self.tmp / "pip_frame.png"
+        frame.write_bytes(b"png")
+        mock.patch.object(server.pipeline, "BROLL_DIR", root).start()
+        mock.patch.object(livemedia, "pip_frame_file", return_value=frame).start()
+        self.write_edl(broll=[{"at": 0, "dur": 1, "file": str(root / "clip.mp4")}, {"at": 1, "dur": 1, "file": str(root / "out.mp4")}])
+        edl = json.loads((self.work / "edl_a.json").read_text())
+        target = livemedia.card_target(edl)
+        card = livemedia.card_file(self.work, "g1", self.work / "gfx" / "g1.mov", target)
+        card.write_bytes(b"webm")
+        card.with_suffix(".json").write_text('{"w": 1280, "h": 720, "dur": 1.5, "fw": 1, "fh": 1}')
+        bd = livemedia.beds_dir(self.work, "a")
+        bd.mkdir(parents=True)
+        (bd / "music.wav").write_bytes(b"RIFFmusic")
+        (bd / "sfx.wav").write_bytes(b"RIFFsfx")
+        for path, body in (("/api/film/a/live/card/g1", b"webm"), ("/api/film/a/live/broll/0", b"stock clip"),
+                           ("/api/film/a/live/bed/music", b"RIFFmusic"), ("/api/film/a/live/pipframe", b"png")):
+            with self.subTest(path=path):
+                self.assertEqual(self.get_raw(path), (200, body))
+        self.assertEqual(self.get_raw("/api/film/a/live/broll/1")[0], 404)
+        v = self.call("/api/film/a/live")[1]
+        g1 = v["overlays"][0]
+        self.assertEqual((g1["state"], g1["dur"]), ("ready", 1.5))  # the card's own length when shorter than the EDL's
+        self.assertTrue(v["broll"][0]["url"].startswith("/api/film/a/live/broll/0?v="))
+        self.assertIsNone(v["broll"][1]["url"])
+        self.assertEqual((v["beds"]["fresh"], v["todo"]["beds"]), (False, True))  # no version stamp: not this EDL's
+
+    def test_live_edl_being_written_is_503(self):
+        (self.work / "edl_a.json").write_text('{"segments": [')
+        self.assertEqual(self.call("/api/film/a/live")[0], 503)
+        (self.work / "edl_a.json").write_text('{"segments": 5}')
+        self.assertEqual(self.call("/api/film/a/live")[0], 502)
+
+    def test_one_job_numbering_for_both_lanes(self):
+        p = server.Panel(self.work, self.tmp / "out")  # the real lanes, not the queue-only stand-ins
+        self.addCleanup(p.media.shutdown)
+        self.addCleanup(p.runner.shutdown)
+        a, b = p.runner.submit("check", "a", []), p.media.submit("live", "a", [])
+        self.assertNotEqual(a.id, b.id)
+        self.assertIs(p.job(b.id), b)
+        self.assertIs(p.job(a.id), a)
+        self.assertIsNone(p.job(10**6))
+
+    def test_live_prepare_runs_on_the_media_lane(self):
+        self.write_edl()
+        st, r = self.call("/api/film/a/live/prepare?beds=0", {})
+        self.assertEqual(st, 200, r)
+        self.assertEqual(self.call("/api/film/a/live/prepare", {})[1], r)  # second click: the same job
+        self.assertEqual(self.kinds(), [])  # the pipeline lane stays free for rebuilds
+        self.assertEqual([(j.kind, j.film) for j in self.panel.media.jobs.values()], [("live", "a")])
+        self.assertEqual(self.call(f"/api/jobs/{r['job']}")[1]["kind"], "live")
+        self.assertIn(r["job"], [j["id"] for j in self.call("/api/jobs")[1]])
+        self.assertEqual(self.call("/api/film/a/live")[1]["job"], r["job"])
+        self.assertEqual(self.call("/api/film/zz/live/prepare", {})[0], 404)
+        self.call("/api/film/a/check", {})
+        self.assertEqual(sorted(self.call("/api/stop", {})[1]["stopped"]), sorted([1, r["job"]]))  # both lanes
+        self.assertEqual(self.panel.media.jobs[r["job"]].status, "stopped")
+
+    def test_render_missing_graphics(self):
+        st, r = self.call("/api/film/a/gfx", {})
+        self.assertEqual((st, self.kinds()), (200, [("gfx", "a")]))
+        self.assertEqual(self.call("/api/film/a/gfx", {})[1], r)  # double click
+        # gfx/render.mjs reads gfx_specs.json once: a spec edited meanwhile would get the old .mov
+        self.assertEqual(self.call("/api/film/a/edit", {"op": "update_spec", "id": "g1", "fields": {"text": "x"}})[0], 409)
+        self.assertTrue(self.panel.gfx_busy())  # the player's card copies wait too
+        self.panel.runner.jobs.clear()
+        self.panel.runner.submit("render", "a", [])
+        self.assertEqual(self.call("/api/film/a/gfx", {})[0], 409)
+        self.panel.runner.jobs.clear()
+        plan = json.loads((self.work / "plan_b.json").read_text())
+        plan.pop("gfx_specs")
+        (self.work / "plan_b.json").write_text(json.dumps(plan))
+        self.assertEqual(self.call("/api/film/b/gfx", {})[0], 400)
+        self.assertEqual(self.call("/api/film/zz/gfx", {})[0], 404)
+        with mock.patch.object(server.pipeline, "foreign_render", return_value=[4242]):
+            self.assertEqual(self.call("/api/film/a/gfx", {})[0], 409)
 
 
 @unittest.skipUnless(server is not None, "needs the panel venv: .venv/bin/python -m unittest discover -s tests")

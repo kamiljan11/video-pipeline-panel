@@ -12,7 +12,7 @@ from typing import Any
 
 from .planops import CARD_SFX, EMPH_WINDOW, GFX_WINDOW, kept_indices, resolve
 
-BOX_TYPES = ("kw", "count", "list", "slide", "web")  # = gfx_types.SIDE_BOX  # side boxes: build_edl keeps zoom at 1.0 under them
+BOX_TYPES = ("kw", "count", "list", "slide", "web", "float")  # = gfx_types.SIDE_BOX  # side boxes: build_edl keeps zoom at 1.0 under them
 
 
 def src2out(segments: list[dict], t: float) -> float:

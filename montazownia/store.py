@@ -70,7 +70,7 @@ def project_key(work: Path) -> str:
 
 
 # per-project areas under panel_dir(); the caches can be rebuilt, history (backups) is never pruned here
-CACHE_KINDS = ("tmp", "preview", "beds", "stale-gfx")
+CACHE_KINDS = ("tmp", "preview", "beds", "stale-gfx", "cache")  # cache/<key>: live player copies (ADR-0007)
 
 
 def project_dir(kind: str, work: Path) -> Path:

@@ -34,7 +34,9 @@ Jedna nazwa na pojęcie. Pierwsza kolumna = UI i dokumentacja (PL), druga = kod 
 | pełny render | `run_v4.sh` | cały film w pełnej jakości do katalogu `out` |
 | podkład | beds, `music/make_beds.py` | muzyka + efekty (SFX) dopasowane do EDL |
 | projekt | katalog `work` | jeden katalog z `plan_*.json`, transkrypcją i `gfx_specs.json`; jeden panel na projekt |
-| zadanie | job (`jobs.py`) | przeliczenie, sprawdzenie, podgląd, poprawki albo render w kolejce panelu (jedno naraz) |
+| zadanie | job (`jobs.py`) | przeliczenie, sprawdzenie, podgląd, poprawki albo render w kolejce panelu (jedno naraz); przygotowanie odtwarzacza ma osobny tor (`Panel.media`, ADR-0007) |
+| odtwarzacz | live player (`live.py`, `ui/live.js`) | film składany w przeglądarce z EDL w czasie rzeczywistym, niska jakość; INNE pojęcie niż podgląd ±10 s (prawdziwy render fragmentu) |
+| kopia nagrania | proxy źródła, `src_*.mp4` w `render/panel/cache` | lekka kopia 720p nagrania dla odtwarzacza (nie mylić z `assemble.py --proxy`) |
 | znacznik | playhead | pionowa linia na osi; podgląd ±10 s i nowa grafika liczą się od niego |
 | zaczep (słowo-zaczep) | `word` / `find`+`near` w `gfx`, `emph` | słowo transkrypcji, do którego przyczepiona jest grafika albo najazd; po cięciach jedzie razem z nim |
 | ramka | box (`kw`, `count`, `list`, `slide`, `web`) | grafika z boku kadru; pod nią `build_edl.py` trzyma zoom 1.0 (C2 „zoom pod ramką”) |

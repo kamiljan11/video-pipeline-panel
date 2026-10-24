@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import itertools
 import json
 import logging
 import math
@@ -26,8 +27,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import media, pipeline, planops, store, timeline
-from .jobs import Runner
+from . import live, livemedia, media, pipeline, planops, store, timeline
+from .jobs import Job, Runner
 from .planops import EditError
 from .store import PIPELINE, Change, ConflictError, History, read_json
 
@@ -41,7 +42,11 @@ class Panel:
     def __init__(self, work: Path, out_dir: Path) -> None:
         self.work, self.out_dir = work.resolve(), out_dir.resolve()
         self.history = History(self.work)
-        self.runner = Runner(store.panel_dir() / "jobs")
+        ids = itertools.count(1)  # one numbering for both lanes: /api/jobs/<id> finds a job in either
+        self.runner = Runner(store.panel_dir() / "jobs", ids)
+        # the live player's media lane: proxies / card copies / beds write only into render/panel, never into work,
+        # so they run beside the pipeline lane (a one-time proxy of a long recording must not hold up edits) (ADR-0007)
+        self.media = Runner(store.panel_dir() / "jobs", ids)
         self.last_rebuild: dict[str, int] = {}
 
     # ---- reading ----
@@ -132,8 +137,52 @@ class Panel:
     def no_gfx_render(self) -> None:
         """A preview renders graphics (gfx/render.mjs reads gfx_specs.json once and skips existing .mov): a spec changed
         meanwhile would get the OLD .mov, which the full render then reuses. So graphics wait for the preview."""
-        if self.runner.busy_with("preview"):
-            raise HTTPException(409, "trwa podgląd (renderuje grafiki): zmień grafikę po jego zakończeniu")
+        if self.runner.busy_with("preview") or self.runner.busy_with("gfx"):
+            raise HTTPException(409, "trwa render grafik (podgląd albo „Renderuj grafiki”): zmień grafikę po jego zakończeniu")
+
+    def gfx_busy(self) -> bool:
+        """gfx/render.mjs may be writing work/gfx/*.mov: the player's card copies wait (a half file would be converted)."""
+        return any(self.runner.busy_with(k) for k in ("preview", "gfx", "render")) or bool(self.foreign_render())
+
+    def job(self, job_id: int) -> Job | None:
+        return self.runner.jobs.get(job_id) or self.media.jobs.get(job_id)
+
+    # ---- live player (ADR-0007) ----
+    def live_edl(self, film: str) -> tuple[Path, dict]:
+        p = self.work / self.plan(film)["edl_out"]
+        if not p.is_file():
+            raise HTTPException(404, "brak EDL filmu: kliknij „Sprawdź”")
+        try:
+            edl = read_json(p)
+        except ValueError as e:  # build_edl.py / face_track.py rewriting it right now: the rebuild's reload reads it again
+            raise HTTPException(503, f"EDL filmu właśnie się zapisuje: {e}") from e
+        if not isinstance(edl, dict) or not isinstance(edl.get("segments"), list):
+            raise HTTPException(502, "EDL filmu nie ma listy ujęć (segments)")
+        return p, edl
+
+    def live_view(self, film: str) -> dict:
+        p, edl = self.live_edl(film)
+        st = livemedia.state(self.work, film, p, edl)
+        subs = None
+        ass = livemedia.local_file(edl.get("subs"))
+        if ass is not None and ass.suffix == ".ass" and ass.stat().st_size < 5_000_000:
+            subs = live.parse_ass(ass.read_text(encoding="utf-8", errors="replace"))
+        specs = {s["id"]: s for s in self.specs(self.plan(film)) if isinstance(s, dict) and isinstance(s.get("id"), str)}
+        view = live.model(film, edl, livemedia.edl_version(p), st, specs, subs)
+        pend = self.media.pending("live", film)
+        gfx = self.runner.pending("gfx", film)
+        view.update({"job": pend.id if pend else None, "gfx_job": gfx.id if gfx else None, "gfx_busy": self.gfx_busy(),
+                     "todo": livemedia.todo(st, beds=True)})
+        return view
+
+    def live_card(self, film: str, gid: str) -> Path:
+        _, edl = self.live_edl(film)
+        o = next((o for o in edl.get("overlays", []) if o.get("id") == gid), None)
+        mov = livemedia.local_file(o.get("file")) if o and store.FILM_NAME.fullmatch(gid) else None
+        f = livemedia.card_file(self.work, gid, mov, livemedia.card_target(edl)) if mov else None
+        if f is None or not f.is_file():
+            raise HTTPException(404, f"brak kopii karty {gid}")
+        return f
 
     def no_foreign_render(self) -> None:
         """Check/preview/fix also run build_edl.py + face_track.py, which rewrite edl_<film>.json under a running render."""
@@ -304,6 +353,16 @@ def changed_gfx(old: str, new: str) -> set[str]:
     return {g for g in a.keys() | b.keys() if a.get(g) != b.get(g)}
 
 
+class FreshUI(StaticFiles):
+    """The page's own files: the browser asks again every time (ETag -> 304, cheap). A cached app.js next to a new
+    index.html left the live player dead after an update (2026-10-24: Play did nothing until a hard reload)."""
+
+    def file_response(self, full_path, stat_result, scope, status_code=200):
+        r = super().file_response(full_path, stat_result, scope, status_code)
+        r.headers["Cache-Control"] = "no-cache"
+        return r
+
+
 def same_origin(headers: Mapping[str, str]) -> bool:
     host = headers.get("host", "")
     if host.split(":")[0] not in ("127.0.0.1", "localhost"):
@@ -318,7 +377,8 @@ def create_app(panel: Panel) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         yield
-        log.info("panel closing: stopping %d jobs", len(panel.runner.active()))
+        log.info("panel closing: stopping %d jobs", len(panel.runner.active()) + len(panel.media.active()))
+        panel.media.shutdown()
         panel.runner.shutdown()  # Ctrl+C / closed terminal: no render keeps writing into the project unseen
 
     app = FastAPI(title="Montażownia", docs_url=None, redoc_url=None, lifespan=lifespan)
@@ -441,6 +501,69 @@ def create_app(panel: Panel) -> FastAPI:
             raise HTTPException(404, "brak podglądu")
         return FileResponse(j.result["file"], media_type="video/mp4")
 
+    # ---- live player: the EDL as data + browser-playable copies (ADR-0007); media files only from the EDL ----
+    @app.get("/api/film/{film}/live")
+    def live_view(film: str) -> dict:
+        return panel.live_view(panel.known(film))
+
+    @app.post("/api/film/{film}/live/prepare")
+    def live_prepare(film: str, beds: bool = True) -> dict:
+        panel.known(film)
+        j = panel.media.pending("live", film)
+        if j is None:
+            j = panel.media.submit("live", film, livemedia.prepare_steps(panel.work, film, beds, panel.gfx_busy))
+        return {"job": j.id}
+
+    @app.get("/api/film/{film}/live/src/{key}")
+    def live_src(film: str, key: str) -> FileResponse:
+        _, edl = panel.live_edl(panel.known(film))
+        p = livemedia.local_file(edl.get("sources", {}).get(key))
+        f = livemedia.source_file(panel.work, p) if p else None
+        if f is None or not f.is_file():
+            raise HTTPException(404, "brak kopii nagrania: przygotuj odtwarzacz")
+        return FileResponse(f, media_type="video/mp4")
+
+    @app.get("/api/film/{film}/live/card/{gid}")
+    def live_card(film: str, gid: str) -> FileResponse:
+        return FileResponse(panel.live_card(panel.known(film), gid), media_type="video/webm")
+
+    @app.get("/api/film/{film}/live/broll/{k}")
+    def live_broll(film: str, k: int) -> FileResponse:
+        _, edl = panel.live_edl(panel.known(film))
+        f = livemedia.broll_file(edl, k)
+        if f is None:
+            raise HTTPException(404, "brak klipu b-roll")
+        return FileResponse(f, media_type="video/mp4")
+
+    @app.get("/api/film/{film}/live/bed/{kind}")
+    def live_bed(film: str, kind: str) -> FileResponse:
+        if kind not in ("music", "sfx"):
+            raise HTTPException(404, "nie ma takiego podkładu")
+        f = livemedia.beds_dir(panel.work, panel.known(film)) / f"{kind}.wav"
+        if not f.is_file():
+            raise HTTPException(404, "brak podkładu: przygotuj odtwarzacz z muzyką")
+        return FileResponse(f, media_type="audio/wav")
+
+    @app.get("/api/film/{film}/live/pipframe")
+    def live_pipframe(film: str) -> FileResponse:
+        _, edl = panel.live_edl(panel.known(film))
+        f = livemedia.pip_frame_file(edl)
+        if f is None:
+            raise HTTPException(404, "brak ramki PiP motywu")
+        return FileResponse(f, media_type="image/png")
+
+    @app.post("/api/film/{film}/gfx")
+    def gfx(film: str) -> dict:
+        """Render the graphics whose .mov is missing (after an edit retired them), without a preview or a full render."""
+        plan = panel.plan(panel.known(film))
+        if panel.runner.busy_with("render"):
+            raise HTTPException(409, "trwa pełny render: on też renderuje grafiki")
+        panel.no_foreign_render()
+        steps = pipeline.gfx_steps(panel.work, plan)
+        if not steps:
+            raise HTTPException(400, "ten film nie ma grafik (gfx_specs)")
+        return submit_once("gfx", film, lambda: steps)
+
     @app.post("/api/film/{film}/render")
     def render(film: str) -> dict:
         panel.known(film)
@@ -453,31 +576,32 @@ def create_app(panel: Panel) -> FastAPI:
 
     @app.post("/api/stop")
     def stop() -> dict:
-        jobs = panel.runner.active()
-        for j in jobs:
-            panel.runner.stop(j.id)
+        jobs = [(panel.runner, j) for j in panel.runner.active()] + [(panel.media, j) for j in panel.media.active()]
+        for lane, j in jobs:
+            lane.stop(j.id)
         # the panel's own process groups are already signalled; the pipeline's stop script also catches ffmpeg
         # children a render left behind, but it ends EVERY pipeline render on the laptop, so only when a render was stopped
-        swept = pipeline.stop_render() if any(j.kind == "render" for j in jobs) else ""
-        return {"stopped": [j.id for j in jobs], "processes": swept}
+        swept = pipeline.stop_render() if any(j.kind == "render" for _, j in jobs) else ""
+        return {"stopped": [j.id for _, j in jobs], "processes": swept}
 
     @app.get("/api/jobs/{job_id}")
     def job(job_id: int, since: int = 0) -> dict:
-        j = panel.runner.jobs.get(job_id)
+        j = panel.job(job_id)
         if not j:
             raise HTTPException(404, "brak zadania")
         return j.view(since)
 
     @app.get("/api/jobs")
     def jobs() -> list[dict]:
-        return [{k: v for k, v in j.view().items() if k != "lines"} for j in sorted(panel.runner.jobs.values(), key=lambda x: -x.id)[:30]]
+        both = [*panel.runner.jobs.values(), *panel.media.jobs.values()]
+        return [{k: v for k, v in j.view().items() if k != "lines"} for j in sorted(both, key=lambda x: -x.id)[:30]]
 
     @app.get("/api/icons")
     def icons() -> list[str]:
         return sorted(p.stem for p in ICONS.glob("*.svg"))
 
     app.mount("/icons", StaticFiles(directory=ICONS), name="icons")
-    app.mount("/", StaticFiles(directory=UI, html=True), name="ui")
+    app.mount("/", FreshUI(directory=UI, html=True), name="ui")
     return app
 
 
@@ -533,7 +657,8 @@ def main() -> None:
     log.info("Montażownia: %s (%s)", url, work)
     if not args.no_browser:
         webbrowser.open(url)
-    uvicorn.run(create_app(panel), host="127.0.0.1", port=args.port, log_level="warning")
+    # an open player tab keeps a video response streaming: without a limit, shutdown waits until the tab is closed
+    uvicorn.run(create_app(panel), host="127.0.0.1", port=args.port, log_level="warning", timeout_graceful_shutdown=5)
 
 
 if __name__ == "__main__":

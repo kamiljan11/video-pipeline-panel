@@ -7,7 +7,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Crect width=%2216%22 height=%2216%22 rx=%223%22 fill=%22%232de2c4%22/%3E%3C/svg%3E">
   <title>Montażownia</title>
 <link rel="stylesheet" href="vendor/vis-timeline-graph2d.min.css">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=live1">
 </head>
 <body>
 <header id="top">
@@ -23,7 +23,7 @@
   <button id="beats" class="ghost" title="beats.py: momenty z tekstu (liczba, zwrot, puenta…) → efekty wg gramatyki montażu">Rozpoznaj momenty</button>
   <button id="broll" class="ghost" title="broll.py: darmowe ujęcia stock (Pexels) tam, gdzie pada konkretna rzecz; tylko shorty">Dobierz b-roll</button>
   <button id="fix" class="ghost" title="critic --fix na kopii planu, z podglądem zmian">Popraw automatycznie</button>
-  <button id="preview" title="Fragment ±10 s wokół znacznika, niska rozdzielczość">▶ Podgląd ±10 s</button>
+  <button id="preview" class="ghost" title="Prawdziwy render (assemble.py --proxy) fragmentu ±10 s wokół znacznika: dokładnie jak w filmie, ale trwa">Podgląd ±10 s</button>
   <span class="sep"></span>
   <button id="render" class="danger" title="Pełny render: run_v4.sh">Renderuj film</button>
   <button id="stop" class="ghost" title="Zatrzymaj zadania panelu (przy renderze: stop_render.py)">■ Stop</button>
@@ -34,6 +34,32 @@
 
 <main>
   <section id="left">
+    <div id="live" aria-label="Odtwarzacz: film na żywo z planu, niska jakość">
+      <div id="livestage">
+        <div id="liveframe">
+          <video id="lva" class="lv on" muted playsinline preload="auto" aria-label="ujęcie"></video>
+          <video id="lvb" class="lv" muted playsinline preload="auto" aria-hidden="true"></video>
+          <video id="lvbroll" class="lbroll" muted playsinline preload="auto" aria-hidden="true"></video>
+          <div id="livecards"></div>
+          <img id="livepipframe" alt="" aria-hidden="true">
+          <div id="livepip"><canvas id="livepipcv"></canvas></div>
+          <div id="liveprog" hidden></div>
+          <div id="livesubs" aria-live="off"></div>
+          <div id="livemsg" hidden></div>
+        </div>
+      </div>
+      <canvas id="lscrub" title="Klik / przeciągnij = przewiń; zielone = grafiki, kreski = cięcia"></canvas>
+      <div id="livebar">
+        <button id="lplay" title="Odtwórz / pauza. Klawisze: Spacja, K = pauza, L = odtwórz, J = 5 s wstecz, ←/→ = klatka (Shift: 1 s), ↑/↓ = poprzednie / następne cięcie, F = pełny ekran, T = duży podgląd">▶ Odtwórz</button>
+        <span id="ltime" class="mono">0:00.0 / 0:00.0</span>
+        <button id="lmute" class="ghost" aria-pressed="false" title="Każdy film startuje wyciszony">Dźwięk: wył.</button>
+        <label class="muted" title="Podkład muzyczny i SFX z music/make_beds.py dla aktualnego EDL (przeliczany po zmianie)"><input type="checkbox" id="lbeds"> muzyka i SFX</label>
+        <span id="lstatus" class="muted"></span>
+        <span class="grow"></span>
+        <button id="ltheatre" class="ghost" title="Odtwarzacz na większość ekranu (T)">Duży podgląd</button>
+        <button id="lfull" class="ghost" title="Pełny ekran (F)">Pełny ekran</button>
+      </div>
+    </div>
     <div id="tlwrap">
       <div id="timeline"></div>
       <div id="wavebox"><span class="lab">A1 głos</span><canvas id="wave"></canvas></div>
@@ -47,16 +73,23 @@
         <span class="muted">klik w oś = znacznik (podgląd, nowa grafika) · kółko = zoom osi · przeciągnij grafikę = przesuń</span>
       </div>
     </div>
-    <nav class="tabs" data-for="lefttabs" role="tablist">
-      <button data-tab="t-preview" class="on" role="tab" aria-selected="true">Podgląd</button>
+  </section>
+
+  <section id="right">
+    <nav class="tabs" data-for="sidetabs" role="tablist">
+      <button data-tab="t-insp" class="on" role="tab" aria-selected="true">Inspektor</button>
       <button data-tab="t-critic" role="tab" aria-selected="false">Krytyk <span id="critcount"></span></button>
+      <button data-tab="t-preview" role="tab" aria-selected="false">Podgląd ±10 s</button>
       <button data-tab="t-globals" role="tab" aria-selected="false">Ustawienia filmu</button>
       <button data-tab="t-log" role="tab" aria-selected="false">Log</button>
     </nav>
-    <div id="lefttabs" class="tabbody">
-      <div id="t-preview" class="pane on">
+    <div id="sidetabs" class="tabbody">
+      <div id="t-preview" class="pane">
         <video id="video" controls preload="none" muted></video>
-        <div id="previewinfo" class="muted">Ustaw znacznik na osi i kliknij „Podgląd ±10 s”. Render niskiej jakości, tylko do oceny.</div>
+        <div id="previewinfo" class="muted">Ustaw znacznik na osi i kliknij „Podgląd ±10 s”: prawdziwy render fragmentu (360p) przez pipeline, do sprawdzenia tego, czego odtwarzacz nie odda dokładnie (dźwięk po masteringu, napisy z libass, grading).</div>
+      </div>
+      <div id="t-insp" class="pane on">
+        <div id="inspector"><div class="muted">Kliknij element na osi albo słowo w transkrypcji.</div></div>
       </div>
       <div id="t-critic" class="pane">
         <div id="critic" class="muted">Kliknij „Sprawdź”, żeby uruchomić krytyka.</div>
@@ -66,10 +99,6 @@
       </div>
       <div id="t-log" class="pane"><pre id="log"></pre></div>
     </div>
-  </section>
-
-  <section id="right">
-    <div id="inspector"><div class="muted">Kliknij element na osi albo słowo w transkrypcji.</div></div>
     <div id="transhead">
       <strong>Transkrypcja</strong>
       <label class="muted"><input type="checkbox" id="allwords"> cała</label>
@@ -82,7 +111,11 @@
 <div id="modal" class="modal"><div class="box" role="dialog" aria-modal="true" aria-labelledby="modaltitle"><div id="modalbody"></div><div class="row" id="modalbtns"></div></div></div>
 <div id="toast" role="status" aria-live="polite"></div>
 
+<style id="livesubstyle"></style>
 <script src="vendor/vis-timeline-graph2d.min.js"></script>
-<script src="app.js"></script>
+<!-- ?v=: files browsers cached before the Cache-Control: no-cache fix (server.FreshUI) load fresh once -->
+<script src="live_core.js?v=live1"></script>
+<script src="live.js?v=live1"></script>
+<script src="app.js?v=live1"></script>
 </body>
 </html>
