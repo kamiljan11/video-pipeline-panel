@@ -343,7 +343,7 @@ class RunV4FailureTest(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp(prefix="montaz-runv4-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
         vp = self.tmp / "vp"
-        for rel in ("build_edl.py", "face_track.py", "critic.py", "assemble.py", "music/make_beds.py", "to_otio.py", "beatfx.py", "behind.py"):
+        for rel in ("build_edl.py", "face_track.py", "critic.py", "assemble.py", "music/make_beds.py", "to_otio.py", "beatfx.py", "behind.py", "edl_guard.py"):
             (vp / rel).parent.mkdir(parents=True, exist_ok=True)
             (vp / rel).write_text(STUB)
         (vp / "gfx").mkdir()
@@ -376,7 +376,7 @@ class RunV4FailureTest(unittest.TestCase):
         self.assertTrue((self.out / "film.mp4").exists())
 
     def test_failed_step_skips_the_render(self):
-        for step in ("build_edl", "face_track", "make_beds"):
+        for step in ("build_edl", "face_track", "edl_guard", "make_beds"):
             with self.subTest(step=step):
                 (self.tmp / "calls.log").unlink(missing_ok=True)
                 (self.vp / "render" / "render.log").unlink(missing_ok=True)

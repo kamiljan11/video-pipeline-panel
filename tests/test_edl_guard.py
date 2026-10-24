@@ -62,7 +62,7 @@ class EdlGuardTest(unittest.TestCase):
                 self.assertFalse(edl_guard.chain_ok(chain, edl_guard.AUDIO))
 
     def test_inputs_are_local_files(self):
-        for path, ok in (("/home/x/a.mp4", True), ("gfx/a.mov", True), ("/x/a:b.mp4", True), ("concat:/a|/b", False),
+        for path, ok in (("/home/x/a.mp4", True), ("gfx/a.mov", True), ("/x/a:b.mp4", True), ("clips/a:b.mp4", True), ("a:b.mp4", False), ("concat:/a|/b", False),
                          ("subfile:,start,0,end,1,:/x", False), ("subfile,,start,0,end,100,,:/etc/hostname", False),
                          ("data:x", False), ("", False)):
             with self.subTest(path=path):
@@ -72,7 +72,8 @@ class EdlGuardTest(unittest.TestCase):
         for seg, ok in (({"zoom": {"a": 1, "b": 1.1, "t0": 0, "t1": 1, "keys": [[0, 1], [1, 1.1]]}}, True),
                         ({"zoom": "1,movie=x"}, False), ({"face": [0.5, "x"]}, False), ({"track": [[0, "x"]]}, False),
                         ({"zoom": {"a": 1, "b": "2", "t0": 0, "t1": 1}}, False), ({"zoom": 10**400}, False),
-                        ({"zoom": 0}, False), ({"zoom": {"a": 0, "b": 1.1, "t0": 0, "t1": 1}}, False)):
+                        ({"zoom": 0}, False), ({"zoom": {"a": 0, "b": 1.1, "t0": 0, "t1": 1}}, False),
+                        ({"zoom": {"a": 1, "b": 1, "t0": 0, "t1": 1, "keys": [[0, 1], [1, 0]]}}, False)):
             with self.subTest(seg=seg):
                 self.assertEqual(edl_guard.segment_ok({"in": 0, "out": 1, **seg}), ok)
 
@@ -81,14 +82,15 @@ class EdlGuardTest(unittest.TestCase):
         """out_name goes to ffmpeg -y as the output path; a bad segment or a null must not end in a traceback"""
         for k, v in (("out_name", "/home/x/.bashrc"), ("out_name", "../../x.mp4"), ("out_name", ".hidden.mp4"),
                      ("out_name", "film"), ("out_name", None), ("music_db", None), ("tail", None), ("tail", 1e8),
-                     ("tail", -1)):
+                     ("tail", -1), ("tail", 60.5), ("out_name", "film (1).mp4"), ("out_name", "film_ąę.mp4")):
             with self.subTest(k=k, v=v):
                 self.assertTrue(edl_guard.problems({**base(), k: v}))
         for seg in ({"src": ["A"], "in": 0, "out": 1}, {"src": {"A": 1}, "in": 0, "out": 1}, {"src": "A", "in": 5, "out": 1},
                     {"src": "A", "in": 1, "out": 1}):
             with self.subTest(seg=seg), self.assertRaises(edl_guard.EdlError):
                 edl_guard.check({**base(), "segments": [seg]})
-        self.assertEqual(edl_guard.problems({**base(), "out_name": "95procent_v2_long.mp4", "tail": 1.2}), [])
+        for tail in (0, 1.2, 60):
+            self.assertEqual(edl_guard.problems({**base(), "out_name": "95procent_v2_long.mp4", "tail": tail}), [])
 
 
 if __name__ == "__main__":
