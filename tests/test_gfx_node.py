@@ -1,5 +1,6 @@
 """The pipeline's JS tests (gfx/test: the "web" card's address guard, quote search, capture failures) run with the
 panel suite, so a regression there fails the same gate. Needs node and /usr/bin/google-chrome (a skipped Chrome case fails here)."""
+import os
 import shutil
 import subprocess
 import unittest
@@ -14,7 +15,8 @@ class GfxNodeTests(unittest.TestCase):
         files = sorted(str(p) for p in (PIPE / "gfx" / "test").glob("*.test.mjs"))
         self.assertTrue(files, f"no JS tests in {PIPE / 'gfx' / 'test'} (the panel lives in ~/video-pipeline/panel)")
         r = subprocess.run(["node", "--test", *files],
-                           cwd=PIPE, capture_output=True, text=True, timeout=300, check=False)
+                           cwd=PIPE, capture_output=True, text=True, check=False,
+                           timeout=int(os.environ.get("MONTAZ_NODE_TIMEOUT", "300")))  # CI runners are ~5x slower
         self.assertEqual(r.returncode, 0, r.stdout[-3000:] + r.stderr[-2000:])
         self.assertRegex(r.stdout, r"ℹ pass [1-9]")
         self.assertRegex(r.stdout, r"ℹ skipped 0\b")  # the Chrome case is the proof of the network guard: never skipped silently

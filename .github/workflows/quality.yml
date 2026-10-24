@@ -21,11 +21,12 @@ jobs:
   test:
     # the tests import the pipeline scripts from "..": check out video-pipeline, this repo inside it as panel/
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: kamiljan11/video-pipeline
+          fetch-depth: 0  # test_sound_v2 compares make_beds with an older commit
           persist-credentials: false
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -55,11 +56,18 @@ jobs:
           npm ci
           python -m venv .venv && .venv/bin/pip install -r requirements.txt
           python -m venv panel/.venv && panel/.venv/bin/pip install -r panel/requirements.txt
+          python -m venv matte/.venv && matte/.venv/bin/pip install -r matte/requirements.txt
+      - name: Models (face detector, matting), checksummed
+        run: |
+          mkdir -p models && curl -fsSL -o models/face_detection_yunet_2023mar.onnx https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx
+          mkdir -p matte/models && curl -fsSL -o matte/models/rvm_resnet50_fp32.onnx https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/rvm_resnet50_fp32.onnx
+          printf '%s  %s\n' 8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4 models/face_detection_yunet_2023mar.onnx 25db300fcb6ee27f941a1b52c97856e8d1f13c7f35817f81a612f89af0e8a85c matte/models/rvm_resnet50_fp32.onnx | sha256sum -c -
       - name: Tests (no sample project, no slow end-to-end run)
         working-directory: panel
         env:
           MONTAZ_SLOW: "0"
           MONTAZ_NO_SAMPLE: "1"
+          MONTAZ_NODE_TIMEOUT: "2400"
         run: .venv/bin/python -m unittest discover -s tests
   secrets:
     runs-on: ubuntu-24.04
