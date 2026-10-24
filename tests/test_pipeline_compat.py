@@ -221,6 +221,15 @@ class EdgeFixTest(unittest.TestCase):
             self.assertNotEqual(r.returncode, 0, spec)
             self.assertIn("v_hook: pill = true/false, only on a maxim", r.stderr)
 
+    def test_graphics_without_their_files_stop_with_a_named_error(self):
+        (self.d / "specs.json").write_text(json.dumps([{"id": "v_end", "type": "end", "canvas": "v", "text": "x", "dur": 3}]))
+        for extra, msg in (({}, 'needs "gfx_specs"'), ({"gfx_specs": "specs.json"}, 'and "gfx_dir"'),
+                           ({"gfx_specs": "specs.json", "gfx_dir": "g", "gfx": [{"id": "nope", "word": 0}]}, "'nope': no such card")):
+            r = self.run_build([[0, 1]], **{"gfx": [{"id": "v_end", "word": "END"}], **extra})
+            self.assertNotEqual(r.returncode, 0, extra)
+            self.assertIn(msg, r.stderr)
+            self.assertNotIn("Traceback", r.stderr)
+
     def test_overlapping_keeps_never_replay_a_computed_start_and_never_invert(self):
         _, segs = self.build([[0, 1], [1, 2]], edge_fix=True)  # next keep repeats "dwa": its start moves to where the first ended
         self.assertEqual(segs[1]["in"], segs[0]["out"])
