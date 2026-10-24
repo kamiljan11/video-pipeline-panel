@@ -27,7 +27,7 @@ MONTAZ_SLOW=0 MONTAZ_NO_SAMPLE=1 .venv/bin/python -m unittest discover -s tests 
 
 A project's `work` directory holds the recording, `words.json` (transcript), `plan_<film>.json` and `gfx_specs.json`.
 Why the code is public and how to undo it: [video-pipeline ADR-0007](https://github.com/kamiljan11/video-pipeline/blob/main/docs/adr/0007-public-github-repos.md)
-(this repository's own ADR-0007 is the live player).
+and, for this repository and its CI, [ADR-0008](docs/adr/0008-public-repo-and-ci.md).
 
 ---
 
