@@ -23,7 +23,7 @@ NO_FACE_LIMIT = 2.0  # face_track sets no zmax when it found no face in a shot: 
 SPEC_TYPES = ("kw", "count", "list", "lower", "chap", "cta", "slide", "end", "web", "maxim")
 MAXIM_MAX = 140  # a "maxim" longer than this covers the face (16:9 bottom band, 9:16 top band)
 CARD_SFX = ("pop", "whoosh", "ding", "pen")  # = music/make_beds.py CARD_SFX (test_timeline checks they agree)
-SPEC_FIELDS = {"text", "sub", "icon", "icons", "items", "delays", "type", "dur", "html", "src", "sfx",
+SPEC_FIELDS = {"text", "sub", "icon", "icons", "items", "delays", "type", "dur", "html", "src", "sfx", "at",
                "canvas", "quote", "beat",  # cards of the editing grammar (beats.py)
                "url", "find", "img", "box", "page"}  # "web": the cited page (gfx/webshot.mjs)
 
@@ -176,6 +176,8 @@ def add_gfx(plan: Plan, specs: Specs, spec: dict, i: int, n_words: int) -> tuple
 
 def duplicate_gfx(plan: Plan, specs: Specs, gfx_id: str, new_id: str, i: int, n_words: int) -> tuple[Plan, Specs]:
     src = next((s for s in specs if s["id"] == gfx_id), None)
+    if src is not None and isinstance(src.get("sfx"), list):  # a copy keeps what music/make_beds.py plays, drops what it skips
+        src = {**src, "sfx": [e for e in src["sfx"] if _playable(e)]}
     if src is None:
         raise EditError(f"brak grafiki {gfx_id}")
     return add_gfx(plan, specs, {**copy.deepcopy(src), "id": new_id}, i, n_words)
@@ -191,7 +193,8 @@ def update_spec(specs: Specs, gfx_id: str, fields: dict) -> Specs:
             new = {**s, **fields}
             if "text" in fields and fields["text"] != s.get("text"):
                 new.pop("at", None)  # per-word times (maxim) belong to the old words: even pace until set again
-            out[i] = _clean_spec(new)  # replaced, not merged: an emptied web field is removed
+            kept = {k: new.pop(k) for k in ("sfx", "at") if k in new and k not in fields}  # stored, not edited now:
+            out[i] = {**_clean_spec(new), **kept}  # as before (make_beds/render skip what they cannot use); an emptied web field is removed
             return out
     raise EditError(f"brak grafiki {gfx_id}")
 
@@ -495,7 +498,9 @@ def _clean_spec(s: dict) -> dict:
     if "delays" in s:
         out["delays"] = [_bounded(x, 0, 60, "opóźnienia") for x in _list(s["delays"], "opóźnienia")]
     if "sfx" in s:  # the card's own sounds [[t from the card's start, name], ...] as music/make_beds.py reads them
-        out["sfx"] = [_card_sfx(e) for e in _list(s["sfx"], "dźwięki karty")]
+        out["sfx"] = [_card_sfx(e, out["dur"]) for e in _list(s["sfx"], "dźwięki karty")]
+    if "at" in s:  # maxim: start of each word in s from the card's start (gfx/maxim_lib.mjs wordTimes)
+        out["at"] = [_bounded(x, 0, out["dur"], "czas słowa") for x in _list(s["at"], "czasy słów")]
     if s["type"] == "web":  # web fields of other card types pass through as they were (render ignores them)
         for k in WEB_TEXT:  # an emptied field = no such field (a card with an own screenshot has no address)
             if out.get(k) == "":
@@ -560,10 +565,16 @@ def _web_fields(s: dict) -> dict:
     return out
 
 
-def _card_sfx(e: Any) -> list:
+def _playable(e: Any) -> bool:
+    """The rule of music/make_beds.py: an entry it plays (others are skipped, never stop the render)."""
+    return isinstance(e, list) and len(e) == 2 and isinstance(e[0], (int, float)) and not isinstance(e[0], bool) \
+        and e[0] == e[0] and abs(e[0]) != float("inf") and isinstance(e[1], str) and e[1] in CARD_SFX
+
+
+def _card_sfx(e: Any, dur: float) -> list:
     if not (isinstance(e, list) and len(e) == 2 and e[1] in CARD_SFX):
         raise EditError(f"dźwięk karty: [sekunda od startu karty, {' / '.join(CARD_SFX)}]")
-    return [_bounded(e[0], 0, 60, "sekunda dźwięku karty"), e[1]]
+    return [_bounded(e[0], 0, dur, "sekunda dźwięku karty (w czasie karty)"), e[1]]
 
 
 def _list(v: Any, name: str) -> list:

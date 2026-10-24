@@ -176,9 +176,18 @@ class SpecSchemaTest(unittest.TestCase):
         m = {"id": "a", "type": "maxim", "text": "x y", "dur": 4, "sfx": [[1.0, "pen"], [2, "pop"]]}
         _, specs = po.duplicate_gfx({"gfx": [{"id": "a", "word": 0}]}, [m], "a", "b", 0, 5)
         self.assertEqual(specs[1]["sfx"], [[1.0, "pen"], [2.0, "pop"]])
-        for sfx in (5, [[1.0, "boom"]], [[-1, "pop"]], [[1.0]], [["x", "pop"]], [[float("nan"), "pop"]]):
-            with self.subTest(sfx=sfx), self.assertRaises(EditError):
+        for sfx in (5, [[1.0, "boom"]], [[-1, "pop"]], [[1.0]], [["x", "pop"]], [[float("nan"), "pop"]], [[4.5, "pop"]]):
+            with self.subTest(sfx=sfx), self.assertRaises(EditError):  # 4.5: after the 4 s card ends
                 po.update_spec([m], "a", {"sfx": sfx})
+
+    def test_stored_fields_not_edited_now_pass_through(self):
+        old = {"id": "a", "type": "maxim", "text": "x y", "dur": 4, "sfx": [[1, "boom"], [1.5, "pen"]], "at": [0.1, 0.6]}
+        s = po.update_spec([old], "a", {"dur": 5})[0]  # make_beds skips "boom": an older card is still editable
+        self.assertEqual((s["dur"], s["sfx"], s["at"]), (5.0, old["sfx"], old["at"]))
+        _, specs = po.duplicate_gfx({"gfx": [{"id": "a", "word": 0}]}, [old], "a", "b", 0, 5)
+        self.assertEqual((specs[1]["sfx"], specs[1]["at"]), ([[1.5, "pen"]], [0.1, 0.6]))  # the copy plays the same
+        with self.assertRaises(EditError):
+            po.update_spec([old], "a", {"at": [0.1, 9]})  # a word after the card ends
 
     def test_web_card_fields(self):
         web = {"type": "web", "url": "https://example.org/raport", "find": "95 procent firm nie widzi zwrotu"}
