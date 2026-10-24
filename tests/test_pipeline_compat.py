@@ -159,6 +159,22 @@ class EdgeFixTest(unittest.TestCase):
                 self.assertEqual((new, r.stdout), (old, old_r.stdout), keeps)
         self.assertEqual(self.critic(), [])  # edge_fix false: no C12/C13 either (only with --edges)
 
+    def test_theme_colors_the_captions_and_nothing_else_without_it(self):
+        base = self.d / "base"; base.mkdir()
+        shutil.copy(BASELINE / "build_edl.py.orig", base / "build_edl.py")
+        keeps = [[0, 1], [3, 6]]
+        self.build(keeps, script=base, ass_out="old.ass")
+        _, old_segs = self.build(keeps, ass_out="new.ass")
+        self.assertEqual((self.d / "new.ass").read_text(), (self.d / "old.ass").read_text())  # no theme.json: same captions
+        self.assertNotIn("theme", json.loads((self.d / "edl.json").read_text()))
+        (self.d / "theme.json").write_text(json.dumps({"theme": "cetus"}))
+        _, segs = self.build(keeps, ass_out="new.ass")
+        ass = (self.d / "new.ass").read_text()
+        self.assertIn("{\\c&HECA76F&}", ass)  # spoken word in the Cetus accent #6FA7EC
+        self.assertNotIn("&HC4E22D", ass)
+        self.assertEqual(json.loads((self.d / "edl.json").read_text())["theme"], {"name": "cetus", "acc": "#6FA7EC", "ink": "#0A1430"})
+        self.assertEqual(segs, old_segs)  # the cut itself never depends on the theme
+
     def test_overlapping_keeps_never_replay_a_computed_start_and_never_invert(self):
         _, segs = self.build([[0, 1], [1, 2]], edge_fix=True)  # next keep repeats "dwa": its start moves to where the first ended
         self.assertEqual(segs[1]["in"], segs[0]["out"])
