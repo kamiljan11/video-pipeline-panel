@@ -176,6 +176,20 @@ class EdgeFixTest(unittest.TestCase):
         self.assertEqual(json.loads((self.d / "edl.json").read_text())["theme"], {"name": "cetus", "acc": "#6FA7EC", "ink": "#0A1430"})
         self.assertEqual(segs, old_segs)  # the cut itself never depends on the theme
 
+    def test_short_tail_only_when_the_plan_asks(self):
+        base = self.d / "base"; base.mkdir()
+        shutil.copy(BASELINE / "build_edl.py.orig", base / "build_edl.py")
+        (self.d / "specs.json").write_text(json.dumps([{"id": "v_end", "type": "end", "canvas": "v", "text": "x", "dur": 3}]))
+        short = {"vertical": True, "ass_out": "s.ass", "gfx_specs": "specs.json", "gfx_dir": "g"}
+        edl = lambda: json.loads((self.d / "edl.json").read_text())
+        self.build([[0, 1], [3, 6]], script=base, **short); old = edl()
+        self.build([[0, 1], [3, 6]], **short)
+        self.assertEqual(edl(), old)  # no "tail" in the plan: a short as before (tail 0)
+        self.build([[0, 1], [3, 6]], **short, tail=3, gfx=[{"id": "v_end", "word": "END"}])
+        new = edl(); body = sum(s["out"] - s["in"] for s in new["segments"])
+        self.assertEqual(new["tail"], 3)
+        self.assertEqual(new["overlays"][0]["at"], round(body, 3))  # the end card starts when the speech ends
+
     def test_overlapping_keeps_never_replay_a_computed_start_and_never_invert(self):
         _, segs = self.build([[0, 1], [1, 2]], edge_fix=True)  # next keep repeats "dwa": its start moves to where the first ended
         self.assertEqual(segs[1]["in"], segs[0]["out"])
