@@ -1,6 +1,6 @@
 """edl_guard.py: what an EDL may carry into ffmpeg (assemble.py checks it before any ffmpeg, behind.py uses its rules).
 Every EDL of the sample and the current projects passes unchanged; text that would become a filter, an option or a
-protocol is refused with the field named. assemble.py itself: tests/test_pipeline_compat.py (EdlGuardAssembleTest)."""
+protocol is refused with the field named. assemble.py itself: tests/test_pipeline_compat.py (CompatTest.test_assemble_refuses_filter_text_from_the_edl_before_any_ffmpeg)."""
 import importlib.util
 import json
 import unittest
@@ -63,16 +63,32 @@ class EdlGuardTest(unittest.TestCase):
 
     def test_inputs_are_local_files(self):
         for path, ok in (("/home/x/a.mp4", True), ("gfx/a.mov", True), ("/x/a:b.mp4", True), ("concat:/a|/b", False),
-                         ("subfile:,start,0,end,1,:/x", False), ("data:x", False), ("", False)):
+                         ("subfile:,start,0,end,1,:/x", False), ("subfile,,start,0,end,100,,:/etc/hostname", False),
+                         ("data:x", False), ("", False)):
             with self.subTest(path=path):
                 self.assertEqual(edl_guard.local_file(path), ok)
 
     def test_segments_zoom_face_track(self):
         for seg, ok in (({"zoom": {"a": 1, "b": 1.1, "t0": 0, "t1": 1, "keys": [[0, 1], [1, 1.1]]}}, True),
                         ({"zoom": "1,movie=x"}, False), ({"face": [0.5, "x"]}, False), ({"track": [[0, "x"]]}, False),
-                        ({"zoom": {"a": 1, "b": "2", "t0": 0, "t1": 1}}, False), ({"zoom": 10**400}, False)):
+                        ({"zoom": {"a": 1, "b": "2", "t0": 0, "t1": 1}}, False), ({"zoom": 10**400}, False),
+                        ({"zoom": 0}, False), ({"zoom": {"a": 0, "b": 1.1, "t0": 0, "t1": 1}}, False)):
             with self.subTest(seg=seg):
                 self.assertEqual(edl_guard.segment_ok({"in": 0, "out": 1, **seg}), ok)
+
+
+    def test_output_name_segments_and_null_are_named_faults_not_crashes(self):
+        """out_name goes to ffmpeg -y as the output path; a bad segment or a null must not end in a traceback"""
+        for k, v in (("out_name", "/home/x/.bashrc"), ("out_name", "../../x.mp4"), ("out_name", ".hidden.mp4"),
+                     ("out_name", "film"), ("out_name", None), ("music_db", None), ("tail", None), ("tail", 1e8),
+                     ("tail", -1)):
+            with self.subTest(k=k, v=v):
+                self.assertTrue(edl_guard.problems({**base(), k: v}))
+        for seg in ({"src": ["A"], "in": 0, "out": 1}, {"src": {"A": 1}, "in": 0, "out": 1}, {"src": "A", "in": 5, "out": 1},
+                    {"src": "A", "in": 1, "out": 1}):
+            with self.subTest(seg=seg), self.assertRaises(edl_guard.EdlError):
+                edl_guard.check({**base(), "segments": [seg]})
+        self.assertEqual(edl_guard.problems({**base(), "out_name": "95procent_v2_long.mp4", "tail": 1.2}), [])
 
 
 if __name__ == "__main__":

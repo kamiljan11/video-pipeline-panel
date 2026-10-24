@@ -24,7 +24,7 @@ Jedna nazwa na pojęcie. Pierwsza kolumna = UI i dokumentacja (PL), druga = kod 
 | kandydat na short | `shorts.py` | ciąg całych zdań longa (25–60 s mowy) z wynikiem: hak w 1. zdaniu, puenta na końcu, start bez nawiązań („Czyli…”); wybór zostaje człowiekowi |
 | motyw | `work/theme.json` → `style/themes/<nazwa>.json` | paleta kolorów projektu (karty, napisy, pasek, ramka PiP); brak pliku = kolory szablonu (ADR-0004 pipeline'u) |
 | złota myśl | `maxim`, `MAXIM_MAX` | zdanie-puenta pisane na ekranie litera po literze w chwili, gdy pada; `*słowa*` w akcencie; najwyżej 140 znaków |
-| dźwięk karty | `sfx` w `gfx_specs`, `CARD_SFX` | własne chwile karty `[[s od startu, pop/whoosh/ding/pen]]` dokładane przez `make_beds.py` do podkładu |
+| dźwięk karty | `sfx` w `gfx_specs`, `CARD_SFX` | własne chwile karty `[[s od startu, pop/whoosh/ding/pen/pencil]]` dokładane przez `make_beds.py` do podkładu |
 | przesunięcie grafiki | `lead` | sekundy od słowa-zaczepu do startu grafiki |
 | krytyk | `critic.py`, C1–C13 | reguły jakości (C1 brak wydarzenia wizualnego, C3 short bez zmiany obrazu, C6 ekran końcowy, C9 liczby bez źródła, C10 gramatyka montażu, C11 b-roll z planu, którego nie dało się ułożyć, C12 martwa cisza na krawędzi ujęcia, C13 cięcie w głośnej mowie…) |
 | akceptuję | `critic_accept` | świadomy wyjątek od uwagi krytyka, z powodem |
