@@ -15,7 +15,7 @@ from pathlib import Path
 PIPE = Path(__file__).resolve().parents[2]
 PY = PIPE / ".venv" / "bin" / "python"
 BASE_REV = "db7219f"  # the make_beds / gen_music before sound v2; without it the tests fail (comparing HEAD with itself proves nothing)
-NEW_SFX = ("tick", "type", "click", "riser", "impact", "paper", "scatter", "roar", "swoosh", "drop")
+NEW_SFX = ("tick", "type", "click", "riser", "impact", "paper", "scatter", "roar", "swoosh", "drop", "pencil")
 SEG = [{"src": "A", "in": 0.0, "out": 6.0, "zoom": 1.0}]
 
 ANALYZE = r"""
@@ -37,6 +37,9 @@ for op, *a in req["ops"]:
         t0, t1, frac = a; s = np.abs(seg(t0, t1)); f = 2 * sr // 1000
         env = np.array([s[i:i + f].max() for i in range(0, len(s) - f, f)]); thr = frac * env.max()
         out.append([t0 + i * f / sr for i in range(3, len(env)) if env[i] > thr and env[i] > 2.5 * env[i - 3:i].max()])
+    elif op == "periodicity":  # 2 ms envelope over t0..t1: the best self-match 30-200 ms later (1 = a perfect fixed rate)
+        s = np.abs(seg(*a)); f = 2 * sr // 1000; env = np.array([s[i:i + f].max() for i in range(0, len(s) - f, f)])
+        e = env - env.mean(); ac = np.correlate(e, e, "full")[len(e) - 1:]; out.append(float(ac[15:100].max() / ac[0]))
 print(json.dumps(out))
 """
 # every CARD_SFX sound as the script builds it: runpy runs make_beds on a tiny EDL, then each sound is made once
@@ -170,6 +173,16 @@ class SoundV2Test(unittest.TestCase):
         self.assertAlmostEqual(raw["roar"][2], 1.2, delta=0.05)
         self.assertAlmostEqual(raw["type"][2], 0.66, delta=0.1)  # a 0.6 s burst + the last tick's ring
         self.assertLessEqual(raw["scatter"][2], 1.0)
+
+    def test_pencil_strokes_are_uneven_not_a_rattle(self):
+        """Kamil 2026-10-24: "pen" (noise under a steady 11 Hz flutter) sounded like a rattlesnake; a pencil writes in strokes
+        of different lengths, so its stroke onsets never come at one fixed rate"""
+        per = {}
+        for name in ("pencil", "pen"):
+            edl, specs = self.edl([("w", 0.0, {"type": "float", "dur": 2.0, "sfx": [[0.2, name]]})])
+            per[name] = self.an(self.ok(edl, specs) / "sfx.wav", ["periodicity", 0.2, 0.75])[0]
+        self.assertGreater(per["pen"], 0.45, per)  # the old sound: the rattle this test guards against
+        self.assertLess(per["pencil"], 0.44, per)
 
     # --- music_moods ---
     def test_moods_differ_keep_one_loudness_and_drop_is_nearly_silent(self):

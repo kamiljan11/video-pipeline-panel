@@ -737,6 +737,27 @@ class CompatTest(unittest.TestCase):
         self.assertEqual(sorted(old), sorted(new))
         self.assertEqual(old[-1], new[-1])
 
+    def test_assemble_refuses_filter_text_from_the_edl_before_any_ffmpeg(self):
+        """edl_guard.py: plans and EDLs can arrive over Syncthing; a value that would become a filter, an option or a
+        protocol stops assemble.py with the field named, and ffmpeg never runs (valid EDLs: the identical-commands test)"""
+        edl = json.loads((SAMPLE / "edl_long.json").read_text())
+        for k, v in (("face", [0.5, "0.45)),vidstabdetect=result=/tmp/x,crop=iw:ih:0:((0"]), ("audio", "anull,amovie=/etc/passwd"),
+                     ("tail", "1,amovie=x"), ("music", "http://example.invalid/x.wav")):
+            with self.subTest(k=k):
+                p = self.tmp / f"edl_bad_{k}.json"
+                p.write_text(json.dumps({**edl, k: v}))
+                bindir = self.tmp / "bin"
+                bindir.mkdir(exist_ok=True)
+                fake = bindir / "ffmpeg"
+                fake.write_text(FAKE_FFMPEG)
+                fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+                log = self.tmp / f"ff-bad-{k}.log"
+                env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}", "FAKE_LOG": str(log)}
+                r = self.run_script(PIPE, "assemble.py", str(p), str(self.tmp / f"render-bad-{k}"), env=env)
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn("EDL refused", r.stderr)
+                self.assertFalse(log.exists())  # no ffmpeg call at all
+
     def test_assemble_proxy_is_fast_and_small(self):
         edl = json.loads((SAMPLE / f"edl_{FILM}.json").read_text())
         p = self.tmp / "edl.json"

@@ -22,7 +22,7 @@ GFX_WINDOW, EMPH_WINDOW = 25, 30
 NO_FACE_LIMIT = 2.0  # face_track sets no zmax when it found no face in a shot: no head to keep in frame (UI says so)
 SPEC_TYPES = ("kw", "count", "list", "lower", "chap", "cta", "slide", "end", "web", "maxim", "float")  # every type gfx/render.mjs draws
 MAXIM_MAX = 140  # a "maxim" longer than this covers the face (16:9 bottom band, 9:16 top band)
-CARD_SFX = ("pop", "whoosh", "ding", "pen", "tick", "type", "click", "riser", "impact", "paper", "scatter", "roar", "swoosh", "drop")  # = music/make_beds.py CARD_SFX (test_timeline checks they agree)
+CARD_SFX = ("pop", "whoosh", "ding", "pen", "pencil", "tick", "type", "click", "riser", "impact", "paper", "scatter", "roar", "swoosh", "drop")  # = music/make_beds.py CARD_SFX (test_timeline checks they agree)
 SPEC_FIELDS = {"text", "sub", "icon", "icons", "items", "delays", "type", "dur", "html", "src", "sfx", "at",
                "canvas", "quote", "beat", "pill",  # cards of the editing grammar (beats.py)
                "url", "find", "img", "box", "page"}  # "web": the cited page (gfx/webshot.mjs)
