@@ -190,6 +190,37 @@ class EdgeFixTest(unittest.TestCase):
         self.assertEqual(new["tail"], 3)
         self.assertEqual(new["overlays"][0]["at"], round(body, 3))  # the end card starts when the speech ends
 
+    def test_caption_box_and_pill_card_change_only_the_captions(self):
+        base = self.d / "base"; base.mkdir()
+        shutil.copy(BASELINE / "build_edl.py.orig", base / "build_edl.py")
+        keeps = [[0, 1], [3, 6]]
+        (self.d / "specs.json").write_text(json.dumps([{"id": "v_hook", "type": "maxim", "canvas": "v", "pill": True, "text": "x", "dur": 1.0}]))
+        short = {"vertical": True, "gfx_specs": "specs.json", "gfx_dir": "g"}
+        _, old_segs = self.build(keeps, script=base, ass_out="old.ass", **short)
+        self.build(keeps, ass_out="new.ass", caption_box=False, **short)
+        self.assertEqual((self.d / "new.ass").read_text(), (self.d / "old.ass").read_text())  # no pill on screen, box off: as before
+        self.build(keeps, ass_out="box.ass", caption_box=True, **short)
+        old, box = (self.d / "old.ass").read_text().splitlines(), (self.d / "box.ass").read_text().splitlines()
+        self.assertEqual([i for i, (a, b) in enumerate(zip(old, box, strict=True)) if a != b], [old.index(next(x for x in old if x.startswith("Style: Cap")))])
+        self.assertIn(",&H00000000,&H00000000,-1,0,0,0,100,100,0,0,3,16,0,2,70,70,650,1", box[old.index(next(x for x in old if x.startswith("Style: Cap")))])
+        cap = lambda f: [ln.split(",")[1:3] for ln in (self.d / f).read_text().splitlines() if ln.startswith("Dialogue: 0,")]
+        self.assertLess(cap("old.ass")[0][0], "0:00:01.00")  # "Raz" starts under where the pill will be
+        _, pill_segs = self.build(keeps, ass_out="pill.ass", gfx=[{"id": "v_hook", "word": 0}], **short)
+        self.assertEqual(pill_segs, old_segs)  # the cut never depends on captions
+        lines = cap("pill.ass")
+        self.assertTrue(all(st >= "0:00:01.00" for st, _ in lines), lines)  # nothing starts under the 1 s pill
+        self.assertEqual(len(lines), len(cap("old.ass")) - sum(st < "0:00:01.00" for st, _ in cap("old.ass")))
+        for bad in ("yes", 1):
+            r = self.run_build(keeps, ass_out="x.ass", caption_box=bad, **short)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("caption_box: true/false", r.stderr)
+        for spec in ({"pill": "false"}, {"pill": True, "canvas": None}, {"pill": True, "type": "kw"}):
+            sp = {k: v for k, v in {"id": "v_hook", "type": "maxim", "canvas": "v", "text": "x", "dur": 1.0, **spec}.items() if v is not None}
+            (self.d / "specs.json").write_text(json.dumps([sp]))
+            r = self.run_build(keeps, ass_out="x.ass", gfx=[{"id": "v_hook", "word": 0}], **short)
+            self.assertNotEqual(r.returncode, 0, spec)
+            self.assertIn("v_hook: pill = true/false, only on a maxim", r.stderr)
+
     def test_overlapping_keeps_never_replay_a_computed_start_and_never_invert(self):
         _, segs = self.build([[0, 1], [1, 2]], edge_fix=True)  # next keep repeats "dwa": its start moves to where the first ended
         self.assertEqual(segs[1]["in"], segs[0]["out"])

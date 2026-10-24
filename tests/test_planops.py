@@ -172,6 +172,18 @@ class SpecSchemaTest(unittest.TestCase):
         self.assertEqual(po.update_spec([m], "a", {"text": "Dwa słowa"})[0]["at"], [0.2, 0.9])
         self.assertNotIn("at", po.update_spec([m], "a", {"text": "Inne dwa"})[0])  # new words: even pace
 
+    def test_pill_is_a_9_16_maxim_flag(self):
+        hook = {"id": "h", "type": "maxim", "canvas": "v", "pill": True, "text": "*95%* firm", "dur": 3.5}
+        plan, specs = po.add_gfx({"gfx": []}, [], hook, 0, 10)
+        self.assertEqual(specs[0]["pill"], True)
+        _, specs = po.duplicate_gfx(plan, specs, "h", "h2", 1, 10)  # the panel copies a hook card
+        self.assertEqual(specs[-1]["pill"], True)
+        for bad in ({"pill": "true"}, {"pill": 1}, {"canvas": None, "pill": True}, {"type": "kw", "pill": True}):
+            spec = {k: v for k, v in {**hook, "id": "x", **bad}.items() if v is not None}
+            with self.subTest(bad=bad), self.assertRaises(EditError):
+                po.add_gfx({"gfx": []}, [], spec, 0, 10)
+        self.assertEqual(po.update_spec([hook], "h", {"pill": False})[0]["pill"], False)
+
     def test_card_sfx(self):
         m = {"id": "a", "type": "maxim", "text": "x y", "dur": 4, "sfx": [[1.0, "pen"], [2, "pop"]]}
         _, specs = po.duplicate_gfx({"gfx": [{"id": "a", "word": 0}]}, [m], "a", "b", 0, 5)

@@ -24,7 +24,7 @@ SPEC_TYPES = ("kw", "count", "list", "lower", "chap", "cta", "slide", "end", "we
 MAXIM_MAX = 140  # a "maxim" longer than this covers the face (16:9 bottom band, 9:16 top band)
 CARD_SFX = ("pop", "whoosh", "ding", "pen")  # = music/make_beds.py CARD_SFX (test_timeline checks they agree)
 SPEC_FIELDS = {"text", "sub", "icon", "icons", "items", "delays", "type", "dur", "html", "src", "sfx", "at",
-               "canvas", "quote", "beat",  # cards of the editing grammar (beats.py)
+               "canvas", "quote", "beat", "pill",  # cards of the editing grammar (beats.py)
                "url", "find", "img", "box", "page"}  # "web": the cited page (gfx/webshot.mjs)
 
 
@@ -495,6 +495,11 @@ def _clean_spec(s: dict) -> dict:
         raise EditError("format grafiki: canvas \"v\" (9:16) albo brak (16:9)")
     if "quote" in s:
         out["quote"] = bool(s["quote"])
+    if "pill" in s:  # maxim 9:16 hook card in the caption zone (the css exists only there; build_edl.py pauses captions under it)
+        if s["pill"] is not True and s["pill"] is not False:
+            raise EditError("pigułka: true albo false")
+        if s["pill"] and (s["type"] != "maxim" or s.get("canvas") != "v"):
+            raise EditError("pigułka (hak shorta): tylko złota myśl 9:16 (maxim z canvas \"v\")")
     if "delays" in s:
         out["delays"] = [_bounded(x, 0, 60, "opóźnienia") for x in _list(s["delays"], "opóźnienia")]
     if "sfx" in s:  # the card's own sounds [[t from the card's start, name], ...] as music/make_beds.py reads them

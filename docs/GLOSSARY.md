@@ -19,6 +19,8 @@ Jedna nazwa na pojęcie. Pierwsza kolumna = UI i dokumentacja (PL), druga = kod 
 | bezpieczny limit | `zmax` | największy zoom, przy którym głowa zostaje w kadrze (liczy `face_track.py`); panel i pipeline nie pozwalają wyżej |
 | grafika | overlay, `gfx`, `gfx_specs.json` | plansza HTML wyrenderowana do `.mov` (`gfx/render.mjs`); `kw`, `count` (licznik: liczby z tekstu odliczane od 0, GSAP), `list`, `lower`, `chap`, `cta`, `slide`, `end`, `web`, `maxim` |
 | ekran końcowy shorta | `tail` w planie shorta + karta `end` z `canvas: "v"` na słowie `END` | ostatnie ~3 s shorta: gdzie pełny odcinek i subskrypcja (`@kamiljan11`: handle z metadanych kanału YouTube, wpisany w `gfx_specs.json`) |
+| hak w pigułce | karta `maxim` z `canvas: "v"` i `pill: true`, w planie na słowie 0 | pierwsze ~3 s shorta: zdanie-hak w białej pigułce w strefie napisów; napisy pod nią pauzują (`build_edl.py`) |
+| napisy w boxie | `"caption_box": true` w planie shorta | napisy shorta w pełnym boxie w kolorze `--ink` motywu na ~64 % wysokości (pod brodą) zamiast gołego tekstu na ~72 % (`build_edl.py`) |
 | kandydat na short | `shorts.py` | ciąg całych zdań longa (25–60 s mowy) z wynikiem: hak w 1. zdaniu, puenta na końcu, start bez nawiązań („Czyli…”); wybór zostaje człowiekowi |
 | motyw | `work/theme.json` → `style/themes/<nazwa>.json` | paleta kolorów projektu (karty, napisy, pasek, ramka PiP); brak pliku = kolory szablonu (ADR-0004 pipeline'u) |
 | złota myśl | `maxim`, `MAXIM_MAX` | zdanie-puenta pisane na ekranie litera po literze w chwili, gdy pada; `*słowa*` w akcencie; najwyżej 140 znaków |
