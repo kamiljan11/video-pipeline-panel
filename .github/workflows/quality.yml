@@ -1,0 +1,64 @@
+name: quality
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - name: Lint (ruff)
+        run: pip install ruff==0.16.10 && ruff check .
+  test:
+    # the tests import the pipeline scripts from "..": check out video-pipeline, this repo inside it as panel/
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: kamiljan11/video-pipeline
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          path: panel
+      - name: Author's path (the pipeline scripts expect /home/kamil-jan/video-pipeline)
+        run: sudo mkdir -p /home/kamil-jan && sudo ln -s "$GITHUB_WORKSPACE" /home/kamil-jan/video-pipeline
+      - name: System tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+          test -x /usr/bin/google-chrome
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+      - name: Install (pipeline npm + .venv, panel .venv)
+        run: |
+          npm ci
+          python -m venv .venv && .venv/bin/pip install -r requirements.txt
+          python -m venv panel/.venv && panel/.venv/bin/pip install -r panel/requirements.txt
+      - name: Tests (no sample project, no slow end-to-end run)
+        working-directory: panel
+        env:
+          MONTAZ_SLOW: "0"
+          MONTAZ_NO_SAMPLE: "1"
+        run: .venv/bin/python -m unittest discover -s tests
+  secrets:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - name: Gitleaks (whole history, built-in rules only)
+        run: |
+          # a committed .gitleaks.toml / .gitleaksignore would let the repo allow-list its own leak
+          test ! -e .gitleaks.toml && test ! -e .gitleaksignore
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.24.2 git /repo --redact --verbose --exit-code 1

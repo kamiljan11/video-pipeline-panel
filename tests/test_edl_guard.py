@@ -3,6 +3,7 @@ Every EDL of the sample and the current projects passes unchanged; text that wou
 protocol is refused with the field named. assemble.py itself: tests/test_pipeline_compat.py (CompatTest.test_assemble_refuses_filter_text_from_the_edl_before_any_ffmpeg)."""
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -33,6 +34,7 @@ def base():
 
 
 class EdlGuardTest(unittest.TestCase):
+    @unittest.skipIf(os.environ.get("MONTAZ_NO_SAMPLE") == "1", "MONTAZ_NO_SAMPLE=1: no real EDL to check (as test_pipeline_compat)")
     def test_every_real_edl_passes(self):
         files = sorted(SAMPLE.glob("edl*.json")) + sorted((PIPE / "render" / "montaz").glob("*/work/edl*.json"))
         self.assertTrue(files, "no EDL to check (sample project missing?)")

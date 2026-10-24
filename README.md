@@ -1,3 +1,38 @@
+# Montażownia
+
+**A local browser editor for the [video-pipeline](https://github.com/kamiljan11/video-pipeline): fix what the automatic
+edit got wrong, see it live, render.** FastAPI + plain JavaScript (vis-timeline), no build step. The panel never edits
+video itself: it changes the plan files and runs the pipeline's own scripts, so every change can be re-rendered from the
+command line too. Published as a reference and a backup; see [LICENSE](LICENSE) (all rights reserved).
+
+- **Live player** of the current EDL: cuts, crop and zoom, cards, PiP, b-roll, captions, music and SFX, with low-res copies
+  prepared in the background ([ADR-0007](docs/adr/0007-live-player.md)).
+- **Timeline** V1-V4 / A1-A3 with critic markers (C1-C13), drag a card to move it, click a word to cut or restore it.
+- **Inspector** for shots (zoom a/b/t0/t1), zooms and cards; **critic** with one-click auto-fix shown as a diff.
+- **Edit moments** detected from the transcript by the editing grammar, **b-roll** from Pexels, **history** with undo.
+- **Render queue** running `run_v4.sh`, with a live log and a stop button.
+
+Requirements: Linux, Python 3.12 with [uv](https://docs.astral.sh/uv/), Node 24, ffmpeg, Google Chrome at
+`/usr/bin/google-chrome`, and a working [video-pipeline](https://github.com/kamiljan11/video-pipeline) checkout with its
+`.venv` and `npm ci` (see its Quick start). The pipeline scripts expect the checkout at `/home/kamil-jan/video-pipeline`
+(the author's machine): elsewhere, symlink that path to your checkout, as CI does.
+
+```bash
+git clone https://github.com/kamiljan11/video-pipeline && cd video-pipeline
+git clone https://github.com/kamiljan11/montazownia panel
+cd panel && uv venv && uv pip install -r requirements.txt
+bin/montazownia <project>/work            # opens http://127.0.0.1:8790; --port, --out, --no-browser
+MONTAZ_SLOW=0 MONTAZ_NO_SAMPLE=1 .venv/bin/python -m unittest discover -s tests   # without the author's sample project
+```
+
+A project's `work` directory holds the recording, `words.json` (transcript), `plan_<film>.json` and `gfx_specs.json`.
+Why the code is public and how to undo it: [video-pipeline ADR-0007](https://github.com/kamiljan11/video-pipeline/blob/main/docs/adr/0007-public-github-repos.md)
+(this repository's own ADR-0007 is the live player).
+
+---
+
+Dokumentacja poniżej po polsku (język roboczy projektu).
+
 # Montażownia — panel montażowy pipeline'u wideo
 
 Lokalny panel w przeglądarce do poprawiania montażu, który zrobił AI-pipeline z `~/video-pipeline`.
@@ -43,7 +78,8 @@ Panel uruchamia skrypty, więc przyjmuje zapytania tylko od własnych stron: ser
 (inna aplikacja na innym porcie localhost, np. n8n, też nie przejdzie). Odmowy idą do logu panelu. Nazwa filmu z adresu przechodzi
 dalej tylko, jeśli istnieje `plan_<nazwa>.json`, a nazwa ma wyłącznie litery, cyfry, `_` i `-` (skrypty pipeline'u wklejają ją do powłoki;
 plik planu o innej nazwie, np. przyniesiony przez Syncthing, panel pomija z ostrzeżeniem w logu). Jeden panel na projekt (blokada w
-`render/panel/locks/`). Brak sekretów i zewnętrznych API.
+`render/panel/locks/`). Jedyne zewnętrzne API: Pexels przy „Dobierz b-roll” (klucz z Infisicala prosto do `stock.py`, nigdy w plikach,
+do Pexels idzie tylko angielskie hasło z listy tematów); poza tym panel działa offline.
 
 ## Gdy coś nie działa
 
