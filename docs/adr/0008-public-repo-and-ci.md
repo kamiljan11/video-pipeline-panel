@@ -30,3 +30,5 @@ pozostaje długiem: obcy musi zrobić symlink albo podmienić ścieżkę.
 **Koszt cykliczny:** 0 zł (GitHub Free, minuty Actions w publicznym repo bez opłat). Czas CI: szacunek 5–10 min na push (instalacja zależności), do potwierdzenia pierwszym biegiem.
 
 **Wykonanie / rollback:** widoczność na private w ustawieniach repo; CI = usunięcie `.github/workflows/quality.yml`.
+
+**Zmiana 2026-10-25 (Kamil):** licencja MIT zamiast „all rights reserved”, jak pipeline (ADR-0007 pipeline'u); `ui/vendor` bez zmian.
