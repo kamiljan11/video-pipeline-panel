@@ -5,7 +5,7 @@ Internal name: Montażownia (the Python package and the command are still `monta
 **A local browser editor for the [video-pipeline](https://github.com/kamiljan11/video-pipeline): fix what the automatic
 edit got wrong, see it live, render.** FastAPI + plain JavaScript (vis-timeline), no build step. The panel never edits
 video itself: it changes the plan files and runs the pipeline's own scripts, so every change can be re-rendered from the
-command line too. Published as a reference and a backup; see [LICENSE](LICENSE) (all rights reserved).
+command line too. Code under the [MIT licence](LICENSE); `ui/vendor` keeps its own licences.
 
 - **Live player** of the current EDL: cuts, crop and zoom, cards, PiP, b-roll, captions, music and SFX, with low-res copies
   prepared in the background ([ADR-0007](docs/adr/0007-live-player.md)).
